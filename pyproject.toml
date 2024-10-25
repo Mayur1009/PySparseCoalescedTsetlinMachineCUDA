@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "PySparseCoalescedTsetlinMachineCUDA"
+version = "0.2.0.1"
+dependencies = [
+    "numpy<2",
+    "pycuda",
+    "scipy",
+]
+readme = "README.md"
+dynamic = [
+    "description",
+    "authors",
+    "license",
+    "keywords",
+]
+
+[tool.setuptools.package-data]
+"*" = ["cuda/*.cu"]
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+
+[tool.ruff]
+line-length = 120
