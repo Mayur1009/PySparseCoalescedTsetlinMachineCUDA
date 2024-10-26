@@ -23,6 +23,7 @@ dynamic = [
 
 [tool.basedpyright]
 typeCheckingMode = "standard"
+reportUnusedImport = false
 
 [tool.ruff]
 line-length = 120

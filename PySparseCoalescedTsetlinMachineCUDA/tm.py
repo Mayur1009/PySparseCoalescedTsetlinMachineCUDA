@@ -21,16 +21,17 @@
 # This code implements the Convolutional Tsetlin Machine from paper arXiv:1905.09688
 # https://arxiv.org/abs/1905.09688
 
+import sys
+
 import numpy as np
-
-import PySparseCoalescedTsetlinMachineCUDA.kernels as kernels
-
+import pycuda.autoinit  # noqa: F401
 import pycuda.curandom as curandom
 import pycuda.driver as cuda
-import pycuda.autoinit
 from pycuda.compiler import SourceModule
 from scipy.sparse import csr_matrix
-import sys
+from tqdm import tqdm
+
+import PySparseCoalescedTsetlinMachineCUDA.kernels as kernels
 
 g = curandom.XORWOWRandomNumberGenerator()
 
@@ -452,7 +453,7 @@ class CommonTsetlinMachine:
         self._init_fit(X, encoded_Y, incremental)
 
         for epoch in range(epochs):
-            for e in range(X.shape[0]):
+            for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
                 class_sum = np.zeros(self.number_of_outputs).astype(np.int32)
                 cuda.memcpy_htod(self.class_sum_gpu, class_sum)
 
@@ -545,7 +546,7 @@ class CommonTsetlinMachine:
         cuda.Context.synchronize()
 
         class_sum = np.zeros((X.shape[0], self.number_of_outputs), dtype=np.int32)
-        for e in range(X.shape[0]):
+        for e in tqdm(range(X.shape[0]), leave=False, desc="Predict"):
             cuda.memcpy_htod(self.class_sum_gpu, class_sum[e, :])
 
             self.encode_packed.prepared_call(
