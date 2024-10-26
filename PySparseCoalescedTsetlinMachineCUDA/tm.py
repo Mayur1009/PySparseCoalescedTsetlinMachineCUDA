@@ -282,7 +282,7 @@ class CommonTsetlinMachine:
                 + (self.dim[1] - self.patch_dim[1])
             )
 
-        if self.max_included_literals == None:
+        if self.max_included_literals is None:
             self.max_included_literals = self.number_of_features
 
         self.number_of_patches = int((self.dim[0] - self.patch_dim[0] + 1) * (self.dim[1] - self.patch_dim[1] + 1))
@@ -423,7 +423,7 @@ class CommonTsetlinMachine:
                 block=self.block,
             )
             cuda.Context.synchronize()
-        elif incremental == False:
+        elif incremental is False:
             self.prepare(
                 g.state,
                 self.ta_state_gpu,
