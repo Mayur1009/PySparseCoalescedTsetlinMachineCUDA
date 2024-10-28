@@ -30,11 +30,9 @@ extern "C"
                 if (carry == 0)
                     break;
 
-                carry_next
-                    = ta_state[id + b] & carry; // Sets carry bits (overflow)
-                                                // passing on to next bit
-                ta_state[id + b]
-                    = ta_state[id + b] ^ carry; // Performs increments with XOR
+                carry_next = ta_state[id + b] & carry;       // Sets carry bits (overflow)
+                                                             // passing on to next bit
+                ta_state[id + b] = ta_state[id + b] ^ carry; // Performs increments with XOR
                 carry = carry_next;
             }
 
@@ -59,11 +57,9 @@ extern "C"
             {
                 if (carry == 0)
                     break;
-                carry_next = (~ta_state[id + b])
-                             & carry; // Sets carry bits (overflow) passing on
-                                      // to next bit
-                ta_state[id + b]
-                    = ta_state[id + b] ^ carry; // Performs increments with XOR
+                carry_next = (~ta_state[id + b]) & carry;    // Sets carry bits (overflow) passing on
+                                                             // to next bit
+                ta_state[id + b] = ta_state[id + b] ^ carry; // Performs increments with XOR
                 carry = carry_next;
             }
 
@@ -77,9 +73,8 @@ extern "C"
     }
 
     __device__ inline void
-    calculate_clause_output (curandState *localState, unsigned int *ta_state,
-                             unsigned int *clause_output, int *clause_patch,
-                             int *X)
+    calculate_clause_output (curandState *localState, unsigned int *ta_state, unsigned int *clause_output,
+                             int *clause_patch, int *X)
     {
         int output_one_patches[PATCHES];
         int output_one_patches_count;
@@ -91,21 +86,17 @@ extern "C"
                 int patch_clause_output = 1;
                 for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk)
                     {
-                        if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]
-                             & X[patch * LA_CHUNKS + la_chunk])
-                            != ta_state[la_chunk * STATE_BITS + STATE_BITS
-                                        - 1])
+                        if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + la_chunk])
+                            != ta_state[la_chunk * STATE_BITS + STATE_BITS - 1])
                             {
                                 patch_clause_output = 0;
                                 break;
                             }
                     }
 
-                if (((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1]
-                      & X[patch * LA_CHUNKS + LA_CHUNKS - 1] & FILTER)
-                     != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS
-                                  - 1]
-                         & FILTER)))
+                if (((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + LA_CHUNKS - 1]
+                      & FILTER)
+                     != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & FILTER)))
                     {
                         patch_clause_output = 0;
                     }
@@ -131,14 +122,12 @@ extern "C"
     }
 
     __device__ inline void
-    update_clause (curandState *localState, int *clause_weight,
-                   unsigned int *ta_state, int clause_output, int clause_patch,
-                   int *X, int y, int class_sum)
+    update_clause (curandState *localState, int *clause_weight, unsigned int *ta_state, int clause_output,
+                   int clause_patch, int *X, int y, int class_sum)
     {
         int target = 1 - 2 * (class_sum > y);
 
-        if (target == -1
-            && curand_uniform (localState) > 1.0 * Q / max (1, CLASSES - 1))
+        if (target == -1 && curand_uniform (localState) > 1.0 * Q / max (1, CLASSES - 1))
             {
                 return;
             }
@@ -146,13 +135,11 @@ extern "C"
         int sign = (*clause_weight >= 0) - (*clause_weight < 0);
 
         int absolute_prediction_error = abs (y - class_sum);
-        if (curand_uniform (localState)
-            <= 1.0 * absolute_prediction_error / (2 * THRESHOLD))
+        if (curand_uniform (localState) <= 1.0 * absolute_prediction_error / (2 * THRESHOLD))
             {
                 if (target * sign > 0)
                     {
-                        int included_literals
-                            = number_of_include_actions (ta_state);
+                        int included_literals = number_of_include_actions (ta_state);
 
                         if (clause_output && abs (*clause_weight) < INT_MAX)
                             {
@@ -160,44 +147,33 @@ extern "C"
                             }
 
                         // Type I Feedback
-                        for (int la_chunk = 0; la_chunk < LA_CHUNKS;
-                             ++la_chunk)
+                        for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk)
                             {
                                 // Generate random bit values
                                 unsigned int la_feedback = 0;
                                 for (int b = 0; b < INT_SIZE; ++b)
                                     {
-                                        if (curand_uniform (localState)
-                                            <= 1.0 / S)
+                                        if (curand_uniform (localState) <= 1.0 / S)
                                             {
                                                 la_feedback |= (1 << b);
                                             }
                                     }
 
-                                if (clause_output
-                                    && included_literals
-                                           <= MAX_INCLUDED_LITERALS)
+                                if (clause_output && included_literals <= MAX_INCLUDED_LITERALS)
                                     {
 #if BOOST_TRUE_POSITIVE_FEEDBACK == 1
-                                        inc (ta_state, 0, la_chunk,
-                                             X[clause_patch * LA_CHUNKS
-                                               + la_chunk]);
+                                        inc (ta_state, 0, la_chunk, X[clause_patch * LA_CHUNKS + la_chunk]);
 #else
                                         inc (ta_state, 0, la_chunk,
-                                             X[clause_patch * LA_CHUNKS
-                                               + la_chunk]
-                                                 & (~la_feedback));
+                                             X[clause_patch * LA_CHUNKS + la_chunk] & (~la_feedback));
 #endif
 
                                         dec (ta_state, 0, la_chunk,
-                                             (~X[clause_patch * LA_CHUNKS
-                                                 + la_chunk])
-                                                 & la_feedback);
+                                             (~X[clause_patch * LA_CHUNKS + la_chunk]) & la_feedback);
                                     }
                                 else
                                     {
-                                        dec (ta_state, 0, la_chunk,
-                                             la_feedback);
+                                        dec (ta_state, 0, la_chunk, la_feedback);
                                     }
                             }
                     }
@@ -213,13 +189,11 @@ extern "C"
                             }
 #endif
 
-                        for (int la_chunk = 0; la_chunk < LA_CHUNKS;
-                             ++la_chunk)
+                        for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk)
                             {
                                 inc (ta_state, 0, la_chunk,
                                      (~X[clause_patch * LA_CHUNKS + la_chunk])
-                                         & (~ta_state[la_chunk * STATE_BITS
-                                                      + STATE_BITS - 1]));
+                                         & (~ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]));
                             }
                     }
             }
@@ -227,41 +201,32 @@ extern "C"
 
     // Evaluate example
     __global__ void
-    evaluate (unsigned int *global_ta_state, int *clause_weights,
-              int *class_sum, int *X)
+    evaluate (unsigned int *global_ta_state, int *clause_weights, int *class_sum, int *X)
     {
         int index = blockIdx.x * blockDim.x + threadIdx.x;
         int stride = blockDim.x * gridDim.x;
 
         for (int clause = index; clause < CLAUSES; clause += stride)
             {
-                unsigned int *ta_state
-                    = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
+                unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
 
                 int clause_output;
                 for (int patch = 0; patch < PATCHES; ++patch)
                     {
                         clause_output = 1;
-                        for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1;
-                             ++la_chunk)
+                        for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk)
                             {
-                                if ((ta_state[la_chunk * STATE_BITS
-                                              + STATE_BITS - 1]
-                                     & X[patch * LA_CHUNKS + la_chunk])
-                                    != ta_state[la_chunk * STATE_BITS
-                                                + STATE_BITS - 1])
+                                if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + la_chunk])
+                                    != ta_state[la_chunk * STATE_BITS + STATE_BITS - 1])
                                     {
                                         clause_output = 0;
                                         break;
                                     }
                             }
 
-                        if ((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS
-                                      - 1]
+                        if ((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1]
                              & X[patch * LA_CHUNKS + LA_CHUNKS - 1] & FILTER)
-                            != (ta_state[(LA_CHUNKS - 1) * STATE_BITS
-                                         + STATE_BITS - 1]
-                                & FILTER))
+                            != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & FILTER))
                             {
                                 clause_output = 0;
                             }
@@ -276,11 +241,8 @@ extern "C"
                     {
                         for (int class_id = 0; class_id < CLASSES; ++class_id)
                             {
-                                int clause_weight
-                                    = clause_weights[class_id * CLAUSES
-                                                     + clause];
-                                atomicAdd (&class_sum[class_id],
-                                           clause_weight);
+                                int clause_weight = clause_weights[class_id * CLAUSES + clause];
+                                atomicAdd (&class_sum[class_id], clause_weight);
                             }
                     }
             }
@@ -288,8 +250,8 @@ extern "C"
 
     // Update state of Tsetlin Automata team
     __global__ void
-    update (curandState *state, unsigned int *global_ta_state,
-            int *clause_weights, int *class_sum, int *X, int *y, int example)
+    update (curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum, int *X, int *y,
+            int example)
     {
         int index = blockIdx.x * blockDim.x + threadIdx.x;
         int stride = blockDim.x * gridDim.x;
@@ -298,19 +260,15 @@ extern "C"
         curandState localState = state[index];
 
         // Calculate clause output first
-        for (unsigned long long clause = index; clause < CLAUSES;
-             clause += stride)
+        for (unsigned long long clause = index; clause < CLAUSES; clause += stride)
             {
-                unsigned int *ta_state
-                    = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
+                unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
 
                 unsigned int clause_output;
                 int clause_patch;
-                calculate_clause_output (&localState, ta_state, &clause_output,
-                                         &clause_patch, X);
+                calculate_clause_output (&localState, ta_state, &clause_output, &clause_patch, X);
 
-                for (unsigned long long class_id = 0; class_id < CLASSES;
-                     ++class_id)
+                for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id)
                     {
                         int local_class_sum = class_sum[class_id];
                         if (local_class_sum > THRESHOLD)
@@ -321,11 +279,9 @@ extern "C"
                             {
                                 local_class_sum = -THRESHOLD;
                             }
-                        update_clause (
-                            &localState,
-                            &clause_weights[class_id * CLAUSES + clause],
-                            ta_state, clause_output, clause_patch, X,
-                            y[example * CLASSES + class_id], local_class_sum);
+                        update_clause (&localState, &clause_weights[class_id * CLAUSES + clause], ta_state,
+                                       clause_output, clause_patch, X, y[example * CLASSES + class_id],
+                                       local_class_sum);
                     }
             }
 

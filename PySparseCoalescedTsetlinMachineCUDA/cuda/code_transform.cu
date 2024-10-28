@@ -4,9 +4,7 @@ extern "C"
     // Transform examples
 
     __global__ void
-    transform (unsigned int *included_literals,
-               unsigned int *included_literals_length, int *X,
-               int *transformed_X)
+    transform (unsigned int *included_literals, unsigned int *included_literals_length, int *X, int *transformed_X)
     {
         int index = blockIdx.x * blockDim.x + threadIdx.x;
         int stride = blockDim.x * gridDim.x;
@@ -20,19 +18,13 @@ extern "C"
                     }
 
                 unsigned int clause_output = 0;
-                for (int patch_chunk = 0; patch_chunk < PATCH_CHUNKS - 1;
-                     ++patch_chunk)
+                for (int patch_chunk = 0; patch_chunk < PATCH_CHUNKS - 1; ++patch_chunk)
                     {
                         clause_output = (~(0U));
-                        for (int literal = 0;
-                             literal < included_literals_length[clause];
-                             ++literal)
+                        for (int literal = 0; literal < included_literals_length[clause]; ++literal)
                             {
-                                clause_output
-                                    &= X[patch_chunk * FEATURES
-                                         + included_literals[clause * FEATURES
-                                                                 * 2
-                                                             + literal * 2]];
+                                clause_output &= X[patch_chunk * FEATURES
+                                                   + included_literals[clause * FEATURES * 2 + literal * 2]];
                             }
 
                         if (clause_output)
@@ -44,15 +36,10 @@ extern "C"
                 if (!clause_output)
                     {
                         clause_output = PATCH_FILTER;
-                        for (int literal = 0;
-                             literal < included_literals_length[clause];
-                             ++literal)
+                        for (int literal = 0; literal < included_literals_length[clause]; ++literal)
                             {
-                                clause_output
-                                    &= X[(PATCH_CHUNKS - 1) * FEATURES
-                                         + included_literals[clause * FEATURES
-                                                                 * 2
-                                                             + literal * 2]];
+                                clause_output &= X[(PATCH_CHUNKS - 1) * FEATURES
+                                                   + included_literals[clause * FEATURES * 2 + literal * 2]];
                             }
                     }
 

@@ -1,3 +1,4 @@
+import pickle
 from time import time
 
 import numpy as np
@@ -6,7 +7,7 @@ from sklearn.metrics import accuracy_score
 
 from PySparseCoalescedTsetlinMachineCUDA.tm import MultiOutputConvolutionalTsetlinMachine2D
 
-clauses_1 = int(256)
+clauses_1 = int(2000)
 s = 10.0
 T_1 = int(clauses_1 * 0.8)
 
@@ -67,3 +68,22 @@ for i in range(epochs):
     )
     f.flush()
 f.close()
+
+print("Prediction before saving...")
+print(f'{accuracy_score(Y_test, tm.predict(X_test))=}')
+
+state = tm.get_state()
+with open("model.tm", "wb") as f:
+    pickle.dump(state, f)
+
+
+tm2 = MultiOutputConvolutionalTsetlinMachine2D(clauses_1, T_1, s, (28, 28, 1), (patch_size, patch_size), q=5)
+
+with open("model.tm", "rb") as f:
+    state_loaded = pickle.load(f)
+
+tm2.set_state(state_loaded)
+
+print("Prediction after loading...")
+print(f'{accuracy_score(Y_test, tm2.predict(X_test))=}')
+
