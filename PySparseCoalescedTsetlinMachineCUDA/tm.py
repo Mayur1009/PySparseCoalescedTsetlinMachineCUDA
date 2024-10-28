@@ -519,6 +519,9 @@ class CommonTsetlinMachine:
 
         return
 
+    def predict(self, X, return_class_sums=False):
+        raise NotImplementedError
+
     def _score(self, X):
         if not self.initialized:
             print("Error: Model not trained.")
@@ -655,8 +658,13 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         X = csr_matrix(X)
         return self._score(X)
 
-    def predict(self, X):
-        return np.argmax(self.score(X), axis=1)
+    def predict(self, X, return_class_sums=False):
+        class_sums = self.score(X)
+        preds = np.argmax(class_sums, axis=1)
+        if return_class_sums:
+            return preds, class_sums
+        else:
+            return preds
 
 
 class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
@@ -712,8 +720,13 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
         return self._score(X)
 
-    def predict(self, X):
-        return (self.score(X) >= 0).astype(np.uint32)
+    def predict(self, X, return_class_sums=False):
+        class_sums = self.score(X)
+        preds = (class_sums >= 0).astype(np.uint32)
+        if return_class_sums:
+            return preds, class_sums
+        else:
+            return preds
 
 
 class MultiOutputTsetlinMachine(CommonTsetlinMachine):
@@ -764,8 +777,13 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
         X = csr_matrix(X)
         return self._score(X)
 
-    def predict(self, X):
-        return (self.score(X) >= 0).astype(np.uint32)
+    def predict(self, X, return_class_sums=True):
+        class_sums = self.score(X)
+        preds = (class_sums >= 0).astype(np.uint32)
+        if return_class_sums:
+            return preds, class_sums
+        else:
+            return preds
 
 
 class MultiClassTsetlinMachine(CommonTsetlinMachine):
@@ -819,8 +837,13 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
         X = csr_matrix(X)
         return self._score(X)
 
-    def predict(self, X):
-        return np.argmax(self.score(X), axis=1)
+    def predict(self, X, return_class_sums=False):
+        class_sums = self.score(X)
+        preds = np.argmax(class_sums, axis=1)
+        if return_class_sums:
+            return preds, class_sums
+        else:
+            return preds
 
 
 class TsetlinMachine(CommonTsetlinMachine):
@@ -870,8 +893,14 @@ class TsetlinMachine(CommonTsetlinMachine):
         X = X.reshape(X.shape[0], X.shape[1], 1)
         return self._score(X)[0, :]
 
-    def predict(self, X):
-        return int(self.score(X) >= 0)
+    def predict(self, X, return_class_sums=False):
+        class_sums = self.score(X)
+        preds = int(class_sums >= 0)
+
+        if return_class_sums:
+            return preds, class_sums
+        else:
+            return preds
 
 
 class RegressionTsetlinMachine(CommonTsetlinMachine):
@@ -915,10 +944,15 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 
         return
 
-    def predict(self, X):
+    def predict(self, X, return_class_sums=False):
         X = X.reshape(X.shape[0], X.shape[1], 1)
+        class_sums = self._score(X)
+        preds = 1.0 * (class_sums[0, :]) * (self.max_y - self.min_y) / (self.T) + self.min_y
 
-        return 1.0 * (self._score(X)[0, :]) * (self.max_y - self.min_y) / (self.T) + self.min_y
+        if return_class_sums:
+            return preds, class_sums
+        else:
+            return preds
 
 
 class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
@@ -1079,5 +1113,10 @@ class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
         X = csr_matrix(X)
         return self._score(X)
 
-    def predict(self, X):
-        return np.argmax(self.score(X), axis=1)
+    def predict(self, X, return_class_sums=False):
+        class_sums = self.score(X)
+        preds = np.argmax(class_sums, axis=1)
+        if return_class_sums:
+            return preds, class_sums
+        else:
+            return preds
