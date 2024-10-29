@@ -102,6 +102,27 @@ class CommonTsetlinMachine:
         ta_state = self.ta_state.reshape((self.number_of_clauses, self.number_of_ta_chunks, self.number_of_state_bits))
         return (ta_state[clause, ta // 32, self.number_of_state_bits - 1] & (1 << (ta % 32))) > 0
 
+    def get_literals(self):
+        literals = np.empty((self.number_of_clauses, self.number_of_features), dtype=np.uint8)
+
+        self.ta_state = np.empty(
+            self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits, dtype=np.uint32
+        )
+        cuda.memcpy_dtoh(self.ta_state, self.ta_state_gpu)
+        ta_state = self.ta_state.reshape((self.number_of_clauses, self.number_of_ta_chunks, self.number_of_state_bits))
+
+        for ci in range(self.number_of_clauses):
+            for fi in range(self.number_of_features):
+                literals[ci, fi] = ta_state[ci, fi // 32, self.number_of_state_bits - 1] & (1 << (fi % 32)) > 0
+
+        return literals
+
+    def get_weights(self):
+        self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
+        cuda.memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
+
+        return self.clause_weights.reshape((self.number_of_outputs, self.number_of_clauses))
+
     def get_state(self):
         self.ta_state = np.empty(
             self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits, dtype=np.uint32
@@ -155,7 +176,8 @@ class CommonTsetlinMachine:
         self.clause_weights = np.array([])
 
     # Transform input data for processing at next layer
-    def transform(self, X):
+    def transform(self, X) -> csr_matrix:
+        """Returns csr_matix of clause outputs. Array shape: (num_samples, num_clauses)"""
         if not self.initialized:
             print("Error: Model not trained.")
             sys.exit(-1)
@@ -217,9 +239,93 @@ class CommonTsetlinMachine:
                 np.int32(self.append_negated),
                 np.int32(0),
             )
+
+        X_transformed = (X_transformed > 0).astype(np.uint8)
+        return csr_matrix(X_transformed)
+
+    def transform_patchwise(self, X) -> csr_matrix:
+        """Returns csr_matix of patch outputs for each clause. Array shape: (num_samples, num_clauses * num_patches)"""
+        if not self.initialized:
+            print("Error: Model not trained.")
+            sys.exit(-1)
+
+        X = csr_matrix(X)
+        number_of_examples = X.shape[0]
+
+        # Copy data to GPU
+        X_indptr_gpu = cuda.mem_alloc(X.indptr.nbytes)
+        X_indices_gpu = cuda.mem_alloc(X.indices.nbytes)
+        cuda.memcpy_htod(X_indptr_gpu, X.indptr)
+        cuda.memcpy_htod(X_indices_gpu, X.indices)
+
+        # PATCH_CHUNKS = (((PATCHES-1)/INT_SIZE + 1))
+        number_of_patch_chunks = (self.number_of_patches - 1) // 32 + 1
+        X_transformed = np.zeros((self.number_of_clauses * self.number_of_patches), dtype=np.uint32)
+        X_transformed_gpu = cuda.mem_alloc(self.number_of_clauses * self.number_of_patches * 4)
+
+        X_transformed_unpacked = np.empty(
+            (number_of_examples, self.number_of_clauses, self.number_of_patches), dtype=np.uint8
+        )
+
+        for e in range(number_of_examples):
+            X_transformed = np.zeros((self.number_of_clauses * self.number_of_patches), dtype=np.uint32)
+            cuda.memcpy_htod(X_transformed_gpu, X_transformed)
+
+            self.encode_packed.prepared_call(
+                self.grid,
+                self.block,
+                X_indptr_gpu,
+                X_indices_gpu,
+                self.encoded_X_packed_gpu,
+                np.int32(e),
+                np.int32(self.dim[0]),
+                np.int32(self.dim[1]),
+                np.int32(self.dim[2]),
+                np.int32(self.patch_dim[0]),
+                np.int32(self.patch_dim[1]),
+                np.int32(self.append_negated),
+                np.int32(0),
+            )
             cuda.Context.synchronize()
 
-        return csr_matrix(X_transformed)
+            self.transform_patchwise_gpu(
+                self.included_literals_gpu,
+                self.included_literals_length_gpu,
+                self.encoded_X_packed_gpu,
+                X_transformed_gpu,
+                grid=self.grid,
+                block=self.block,
+            )
+            cuda.Context.synchronize()
+
+            cuda.memcpy_dtoh(X_transformed, X_transformed_gpu)
+
+            self.restore_packed.prepared_call(
+                self.grid,
+                self.block,
+                X_indptr_gpu,
+                X_indices_gpu,
+                self.encoded_X_packed_gpu,
+                np.int32(e),
+                np.int32(self.dim[0]),
+                np.int32(self.dim[1]),
+                np.int32(self.dim[2]),
+                np.int32(self.patch_dim[0]),
+                np.int32(self.patch_dim[1]),
+                np.int32(self.append_negated),
+                np.int32(0),
+            )
+
+            for ci in range(self.number_of_clauses):
+                for pi in range(self.number_of_patches):
+                    chunk_nr = pi // 32
+                    chunk_pos = pi % 32
+                    t = X_transformed[ci * number_of_patch_chunks + chunk_nr] & (1 << chunk_pos)
+                    X_transformed_unpacked[e, ci, pi] = (t > 0).astype(np.uint8)
+
+        return csr_matrix(
+            X_transformed_unpacked.reshape((number_of_examples, self.number_of_clauses * self.number_of_patches))
+        )
 
     def init_gpu(self):
         self._init_gpu_code()
@@ -293,6 +399,7 @@ class CommonTsetlinMachine:
         # Transform
         mod_transform = SourceModule(parameters + kernels.code_header + kernels.code_transform, no_extern_c=True)
         self.transform_gpu = mod_transform.get_function("transform")
+        self.transform_patchwise_gpu = mod_transform.get_function("transform_patchwise")
 
     def _init_fit(self):
         if self.append_negated:
