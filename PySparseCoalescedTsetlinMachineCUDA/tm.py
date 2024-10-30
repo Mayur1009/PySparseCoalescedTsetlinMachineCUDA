@@ -68,6 +68,7 @@ class CommonTsetlinMachine:
         self.encoded_Y = np.array([])
         self.ta_state = np.array([])
         self.clause_weights = np.array([])
+        self.patch_weights = np.array([])
 
         self.negative_clauses = 1  # Default is 1, set to 0 in RegressionTsetlinMachine
         self.initialized = False
@@ -78,6 +79,9 @@ class CommonTsetlinMachine:
         )
         self.clause_weights_gpu = cuda.mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
         self.class_sum_gpu = cuda.mem_alloc(self.number_of_outputs * 4)
+        self.patch_weights_gpu = cuda.mem_alloc(
+            self.number_of_outputs * self.number_of_clauses * self.number_of_patches * 4
+        )
 
         self.included_literals_gpu = cuda.mem_alloc(
             self.number_of_clauses * self.number_of_features * 2 * 4
@@ -123,13 +127,25 @@ class CommonTsetlinMachine:
 
         return self.clause_weights.reshape((self.number_of_outputs, self.number_of_clauses))
 
+    def get_patch_weights(self):
+        self.patch_weights = np.empty(
+            self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
+        )
+        cuda.memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
+
+        return self.patch_weights.reshape((self.number_of_outputs, self.number_of_clauses, self.number_of_patches))
+
     def get_state(self):
         self.ta_state = np.empty(
             self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits, dtype=np.uint32
         )
         self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
+        self.patch_weights = np.empty(
+            self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
+        )
         cuda.memcpy_dtoh(self.ta_state, self.ta_state_gpu)
         cuda.memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
+        cuda.memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
         return (
             self.ta_state,
@@ -145,6 +161,7 @@ class CommonTsetlinMachine:
             self.append_negated,
             self.min_y,
             self.max_y,
+            self.patch_weights,
         )
 
     def set_state(self, state):
@@ -164,6 +181,7 @@ class CommonTsetlinMachine:
         self.init_gpu()
         cuda.memcpy_htod(self.ta_state_gpu, state[0])
         cuda.memcpy_htod(self.clause_weights_gpu, state[1])
+        cuda.memcpy_htod(self.patch_weights_gpu, state[13])
         self._init_encoded_X()
         self.initialized = True
 
@@ -174,6 +192,7 @@ class CommonTsetlinMachine:
 
         self.ta_state = np.array([])
         self.clause_weights = np.array([])
+        self.patch_weights = np.array([])
 
     # Transform input data for processing at next layer
     def transform(self, X) -> csr_matrix:
@@ -383,7 +402,7 @@ class CommonTsetlinMachine:
         # Update
         mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
         self.update = mod_update.get_function("update")
-        self.update.prepare("PPPPPPi")
+        self.update.prepare("PPPPPPPi")
 
         self.evaluate_update = mod_update.get_function("evaluate")
         self.evaluate_update.prepare("PPPP")
@@ -578,6 +597,7 @@ class CommonTsetlinMachine:
                     g.state,
                     self.ta_state_gpu,
                     self.clause_weights_gpu,
+                    self.patch_weights_gpu,
                     self.class_sum_gpu,
                     self.encoded_X_gpu,
                     self.encoded_Y_gpu,
@@ -690,11 +710,6 @@ class CommonTsetlinMachine:
             cuda.memcpy_dtoh(class_sum[e, :], self.class_sum_gpu)
 
         return class_sum
-
-    def sync_state(self):
-        cuda.Context.synchronize()
-        cuda.memcpy_dtoh(self.ta_state, self.ta_state_gpu)
-        cuda.memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
 
 
 class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
