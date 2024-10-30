@@ -113,7 +113,7 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
 
             if (clause_output && abs(*clause_weight) < INT_MAX) {
                 (*clause_weight) += sign;
-                    (*patch_weight) += sign;
+                (*patch_weight) += sign;
             }
 
             // Type I Feedback

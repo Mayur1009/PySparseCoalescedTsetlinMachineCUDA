@@ -1063,6 +1063,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
             return preds
 
 
+# FIXME: Broken because of patch_weights.
 class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
     def __init__(
         self,
