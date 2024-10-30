@@ -107,19 +107,18 @@ class CommonTsetlinMachine:
         return (ta_state[clause, ta // 32, self.number_of_state_bits - 1] & (1 << (ta % 32))) > 0
 
     def get_literals(self):
-        literals = np.empty((self.number_of_clauses, self.number_of_features), dtype=np.uint8)
-
-        self.ta_state = np.empty(
-            self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits, dtype=np.uint32
+        literals_gpu = cuda.mem_alloc(self.number_of_clauses * self.number_of_features * 4)
+        self.get_literals_gpu(
+            self.ta_state_gpu,
+            literals_gpu,
+            grid=self.grid,
+            block=self.block,
         )
-        cuda.memcpy_dtoh(self.ta_state, self.ta_state_gpu)
-        ta_state = self.ta_state.reshape((self.number_of_clauses, self.number_of_ta_chunks, self.number_of_state_bits))
+        cuda.Context.synchronize()
 
-        for ci in range(self.number_of_clauses):
-            for fi in range(self.number_of_features):
-                literals[ci, fi] = ta_state[ci, fi // 32, self.number_of_state_bits - 1] & (1 << (fi % 32)) > 0
-
-        return literals
+        literals = np.empty((self.number_of_clauses * self.number_of_features), dtype=np.uint32)
+        cuda.memcpy_dtoh(literals, literals_gpu)
+        return literals.reshape((self.number_of_clauses, self.number_of_features)).astype(np.uint8)
 
     def get_weights(self):
         self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
@@ -418,7 +417,15 @@ class CommonTsetlinMachine:
         # Transform
         mod_transform = SourceModule(parameters + kernels.code_header + kernels.code_transform, no_extern_c=True)
         self.transform_gpu = mod_transform.get_function("transform")
+        self.transform_gpu.prepare("PPPP")
+
         self.transform_patchwise_gpu = mod_transform.get_function("transform_patchwise")
+        self.transform_patchwise_gpu.prepare("PPPP")
+
+        # Misc Clause operations
+        mod_clauses = SourceModule(parameters + kernels.code_header + kernels.code_clauses, no_extern_c=True)
+        self.get_literals_gpu = mod_clauses.get_function("get_literals")
+        self.get_literals_gpu.prepare("PP")
 
     def _init_fit(self):
         if self.append_negated:

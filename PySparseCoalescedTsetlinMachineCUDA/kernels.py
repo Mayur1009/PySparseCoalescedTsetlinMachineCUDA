@@ -25,6 +25,7 @@ import pathlib
 
 current_dir = pathlib.Path(__file__).parent
 
+
 def get_kernel(file):
     path = current_dir.joinpath(file)
     with path.open("r") as f:
@@ -60,3 +61,4 @@ code_evaluate = get_kernel("cuda/code_evaluate.cu")
 code_prepare = get_kernel("cuda/code_prepare.cu")
 code_encode = get_kernel("cuda/code_encode.cu")
 code_transform = get_kernel("cuda/code_transform.cu")
+code_clauses = get_kernel("cuda/code_clauses.cu")

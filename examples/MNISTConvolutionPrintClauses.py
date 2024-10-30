@@ -48,6 +48,7 @@ for i in range(epochs):
 X = X_train[:2]
 Y = Y_train_org[:2]
 literals = tm.get_literals()
+print(f'{literals.shape=}')
 weights = tm.get_weights()
 print(f'{weights.shape=}')
 clause_outputs = tm.transform(X)
