@@ -132,7 +132,14 @@ class CommonTsetlinMachine:
         )
         cuda.memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
-        return self.patch_weights.reshape((self.number_of_outputs, self.number_of_clauses, self.number_of_patches))
+        return self.patch_weights.reshape(
+            (
+                self.number_of_outputs,
+                self.number_of_clauses,
+                self.dim[0] - self.patch_dim[0] + 1,
+                self.dim[1] - self.patch_dim[1] + 1,
+            )
+        )
 
     def get_state(self):
         self.ta_state = np.empty(
@@ -756,6 +763,10 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         self.negative_clauses = 1
 
     def fit(self, X, Y, epochs=100, incremental=False):
+        if len(X.shape) == 3:
+            print(f"Expecting X with 2D shape, got {X.shape}. Flattening the array...")
+            X = X.reshape((X.shape[0], -1))
+            print(f"New X.shape => {X.shape}")
         X = csr_matrix(X)
 
         self.number_of_outputs = int(np.max(Y) + 1)
@@ -819,6 +830,10 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         self.negative_clauses = 1
 
     def fit(self, X, Y, epochs=100, incremental=False):
+        if len(X.shape) == 3:
+            print(f"Expecting X with 2D shape, got {X.shape}. Flattening the array...")
+            X = X.reshape((X.shape[0], -1))
+            print(f"New X.shape => {X.shape}")
         X = csr_matrix(X)
 
         self.number_of_outputs = Y.shape[1]
@@ -836,6 +851,10 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         return self._score(X)
 
     def predict(self, X, return_class_sums=False):
+        if len(X.shape) == 3:
+            print(f"Expecting X with 2D shape, got {X.shape}. Flattening samples...")
+            X = X.reshape((X.shape[0], -1))
+            print(f"New X.shape => {X.shape}")
         class_sums = self.score(X)
         preds = (class_sums >= 0).astype(np.uint32)
         if return_class_sums:
@@ -893,6 +912,10 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
         return self._score(X)
 
     def predict(self, X, return_class_sums=True):
+        if len(X.shape) == 3:
+            print(f"Expecting X with 2D shape, got {X.shape}. Flattening samples...")
+            X = X.reshape((X.shape[0], -1))
+            print(f"New X.shape => {X.shape}")
         class_sums = self.score(X)
         preds = (class_sums >= 0).astype(np.uint32)
         if return_class_sums:
