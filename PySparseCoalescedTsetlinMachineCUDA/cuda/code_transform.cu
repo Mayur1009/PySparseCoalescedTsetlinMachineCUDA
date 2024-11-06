@@ -53,13 +53,13 @@ __global__ void transform_patchwise(unsigned int* included_literals, unsigned in
                 clause_output &= X[patch_chunk * FEATURES + included_literals[clause * FEATURES * 2 + literal * 2]];
             }
 
-            // for (int bit = 0; bit < INT_SIZE; bit++) {
-            //     // unsigned int patch_output = clause_output & (1 << bit);
-            //     // int patch_nr = patch_chunk * INT_SIZE + bit;
-            //     transformed_X[clause * PATCHES + patch_chunk * INT_SIZE + bit] = clause_output & (1 << bit);
-            // }
+            for (int bit = 0; bit < INT_SIZE; bit++) {
+                // unsigned int patch_output = clause_output & (1 << bit);
+                // int patch_nr = patch_chunk * INT_SIZE + bit;
+                transformed_X[clause * PATCHES + patch_chunk * INT_SIZE + bit] = (clause_output & (1 << bit)) > 0;
+            }
 
-            transformed_X[clause * PATCH_CHUNKS + patch_chunk] = clause_output;
+            // transformed_X[clause * PATCH_CHUNKS + patch_chunk] = clause_output;
         }
 
         clause_output = PATCH_FILTER;
@@ -67,10 +67,10 @@ __global__ void transform_patchwise(unsigned int* included_literals, unsigned in
             clause_output &= X[(PATCH_CHUNKS - 1) * FEATURES + included_literals[clause * FEATURES * 2 + literal * 2]];
         }
 
-        // for (int bit = 0; bit < INT_SIZE; bit++) {
-        //     transformed_X[clause * PATCHES + (PATCH_CHUNKS - 1) * INT_SIZE + bit] = clause_output & (1 << bit);
-        // }
-        transformed_X[clause * PATCH_CHUNKS + PATCH_CHUNKS - 1] = clause_output;
+        for (int bit = 0; bit < INT_SIZE; bit++) {
+            transformed_X[clause * PATCHES + (PATCH_CHUNKS - 1) * INT_SIZE + bit] = clause_output & (1 << bit) > 0;
+        }
+        // transformed_X[clause * PATCH_CHUNKS + PATCH_CHUNKS - 1] = clause_output;
     }
 }
 }

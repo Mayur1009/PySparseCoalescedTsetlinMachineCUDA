@@ -146,31 +146,23 @@ for c in range(10):
         for m in range(M):
             for n in range(N):
                 if np.abs(patch_weights[ci, m, n]) > th:
-                    tpos[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += (
-                        pos_lits * patch_weights[ci, m, n]
-                    )
-                    tneg[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += (
-                        neg_lits * patch_weights[ci, m, n]
-                    )
-                    teff[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += (
-                        (pos_lits - neg_lits).astype(int) * patch_weights[ci, m, n] 
-                    )
-
-        # tpos = tpos * weights[ci]
-        # tneg = tneg * weights[ci]
-        # teff = teff * weights[ci]
+                    tpos[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += pos_lits * patch_weights[ci, m, n]
+                    tneg[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += neg_lits * patch_weights[ci, m, n]
+                    teff[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += (pos_lits - neg_lits).astype(
+                        int
+                    ) * patch_weights[ci, m, n]
 
         polarity = (weights[ci] > 0) & 1
 
-        avg_clause_img[polarity, 0] = avg_clause_img[polarity, 0] + (tpos - avg_clause_img[polarity, 0]) / (
-            tm.number_of_clauses + 1
-        )
-        avg_clause_img[polarity, 1] = avg_clause_img[polarity, 1] + (tneg - avg_clause_img[polarity, 1]) / (
-            tm.number_of_clauses + 1
-        )
-        avg_clause_img[polarity, 2] = avg_clause_img[polarity, 2] + (teff - avg_clause_img[polarity, 2]) / (
-            tm.number_of_clauses + 1
-        )
+        avg_clause_img[polarity, 0] = avg_clause_img[polarity, 0] + (
+            tpos * abs(weights[ci]) - avg_clause_img[polarity, 0]
+        ) / (tm.number_of_clauses + 1)
+        avg_clause_img[polarity, 1] = avg_clause_img[polarity, 1] + (
+            tneg * abs(weights[ci]) - avg_clause_img[polarity, 1]
+        ) / (tm.number_of_clauses + 1)
+        avg_clause_img[polarity, 2] = avg_clause_img[polarity, 2] + (
+            teff * abs(weights[ci]) - avg_clause_img[polarity, 2]
+        ) / (tm.number_of_clauses + 1)
 
     fig, axs = plt.subplots(2, 3, squeeze=False, layout="compressed")
     for p in range(2):

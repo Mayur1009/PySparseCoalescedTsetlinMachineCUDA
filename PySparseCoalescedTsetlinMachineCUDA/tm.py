@@ -219,6 +219,18 @@ class CommonTsetlinMachine:
         X_transformed = np.empty((number_of_examples, self.number_of_clauses), dtype=np.uint32)
         X_transformed_gpu = cuda.mem_alloc(self.number_of_clauses * 4)
 
+        self.prepare_packed(
+            g.state,
+            self.ta_state_gpu,
+            self.included_literals_gpu,
+            self.included_literals_length_gpu,
+            self.excluded_literals_gpu,
+            self.excluded_literals_length_gpu,
+            grid=self.grid,
+            block=self.block,
+        )
+        cuda.Context.synchronize()
+
         for e in range(number_of_examples):
             self.encode_packed.prepared_call(
                 self.grid,
@@ -269,7 +281,7 @@ class CommonTsetlinMachine:
         return csr_matrix(X_transformed)
 
     def transform_patchwise(self, X) -> csr_matrix:
-        """Returns csr_matix of patch outputs for each clause. Array shape: (num_samples, num_clauses * num_patches)"""
+        """Returns SPARSE CSR MATRIX of patch outputs for each clause. Array shape: (num_samples, num_clauses * num_patches)"""
         if not self.initialized:
             print("Error: Model not trained.")
             sys.exit(-1)
@@ -283,19 +295,23 @@ class CommonTsetlinMachine:
         cuda.memcpy_htod(X_indptr_gpu, X.indptr)
         cuda.memcpy_htod(X_indices_gpu, X.indices)
 
-        # PATCH_CHUNKS = (((PATCHES-1)/INT_SIZE + 1))
-        number_of_patch_chunks = (self.number_of_patches - 1) // 32 + 1
-        X_transformed = np.zeros((self.number_of_clauses * self.number_of_patches), dtype=np.uint32)
+        # Array to capture output from gpu
+        X_transformed = np.empty((number_of_examples, self.number_of_clauses * self.number_of_patches), dtype=np.uint32)
         X_transformed_gpu = cuda.mem_alloc(self.number_of_clauses * self.number_of_patches * 4)
 
-        X_transformed_unpacked = np.empty(
-            (number_of_examples, self.number_of_clauses, self.number_of_patches), dtype=np.uint8
+        self.prepare_packed(
+            g.state,
+            self.ta_state_gpu,
+            self.included_literals_gpu,
+            self.included_literals_length_gpu,
+            self.excluded_literals_gpu,
+            self.excluded_literals_length_gpu,
+            grid=self.grid,
+            block=self.block,
         )
+        cuda.Context.synchronize()
 
         for e in range(number_of_examples):
-            X_transformed = np.zeros((self.number_of_clauses * self.number_of_patches), dtype=np.uint32)
-            cuda.memcpy_htod(X_transformed_gpu, X_transformed)
-
             self.encode_packed.prepared_call(
                 self.grid,
                 self.block,
@@ -323,7 +339,7 @@ class CommonTsetlinMachine:
             )
             cuda.Context.synchronize()
 
-            cuda.memcpy_dtoh(X_transformed, X_transformed_gpu)
+            cuda.memcpy_dtoh(X_transformed[e, :], X_transformed_gpu)
 
             self.restore_packed.prepared_call(
                 self.grid,
@@ -341,16 +357,8 @@ class CommonTsetlinMachine:
                 np.int32(0),
             )
 
-            for ci in range(self.number_of_clauses):
-                for pi in range(self.number_of_patches):
-                    chunk_nr = pi // 32
-                    chunk_pos = pi % 32
-                    t = X_transformed[ci * number_of_patch_chunks + chunk_nr] & (1 << chunk_pos)
-                    X_transformed_unpacked[e, ci, pi] = (t > 0).astype(np.uint8)
-
-        return csr_matrix(
-            X_transformed_unpacked.reshape((number_of_examples, self.number_of_clauses * self.number_of_patches))
-        )
+        # NOTE: RETURNS CSR_MATRIX
+        return csr_matrix(X_transformed.reshape((number_of_examples, self.number_of_clauses * self.number_of_patches)))
 
     def init_gpu(self):
         self._init_gpu_code()

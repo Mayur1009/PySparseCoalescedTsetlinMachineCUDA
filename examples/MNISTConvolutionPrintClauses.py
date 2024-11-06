@@ -48,13 +48,10 @@ for i in range(epochs):
 X = X_train[:2]
 Y = Y_train_org[:2]
 literals = tm.get_literals()
-print(f'{literals.shape=}')
+print(f"{literals.shape=}")
 weights = tm.get_weights()
-print(f'{weights.shape=}')
-clause_outputs = tm.transform(X)
+print(f"{weights.shape=}")
 patch_outputs = tm.transform_patchwise(X)
-
-clause_outputs = np.array(clause_outputs.todense()).reshape((2, tm.number_of_clauses))
 
 M, N = tm.dim[0] - tm.patch_dim[0] + 1, tm.dim[1] - tm.patch_dim[1] + 1
 patch_outputs = np.array(patch_outputs.todense()).reshape((2, tm.number_of_clauses, M, N))
@@ -63,12 +60,12 @@ num_loc_lits = M - 1 + N - 1
 half_lits = tm.number_of_features // 2
 
 print(f"{literals.shape=}")
-print(f"{clause_outputs.shape=}")
 print(f"{patch_outputs.shape=}")
 
 for e in range(2):
-    print(f'{Y[e]=}')
+    print(f"{Y[e]=}")
     tot_active = 0
+    po = 0
 
     pimg = np.zeros((28, 28))
     nimg = np.zeros((28, 28))
@@ -90,6 +87,7 @@ for e in range(2):
             for m in range(M):
                 for n in range(N):
                     if patch_outputs[e, ci, m, n] == 1:
+                        po += 1
                         tpos[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += pos_lits
                         tneg[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += neg_lits
 
@@ -103,7 +101,8 @@ for e in range(2):
             nwimg += tneg * w
             ewimg += (tpos - tneg) * w
 
-    print(f'{tot_active=}')
+    print(f"{tot_active=}")
+    print(f"{po=}")
     tot_active = tot_active if tot_active > 0 else 1
     # pimg /= tot_active
     # nimg /= tot_active
