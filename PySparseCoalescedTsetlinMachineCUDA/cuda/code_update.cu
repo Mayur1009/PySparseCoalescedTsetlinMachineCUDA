@@ -96,8 +96,9 @@ __device__ inline void calculate_clause_output(curandState *localState, unsigned
     }
 }
 
-__device__ inline void update_clause(curandState *localState, int *clause_weight, int *patch_weight, unsigned int *ta_state,
-                                     int clause_output, int clause_patch, int *X, int y, int class_sum) {
+__device__ inline void update_clause(curandState *localState, int *clause_weight, int *patch_weight, int weight_scaler,
+                                     unsigned int *ta_state, int clause_output, int clause_patch, int *X, int y,
+                                     int class_sum) {
     int target = 1 - 2 * (class_sum > y);
 
     if (target == -1 && curand_uniform(localState) > 1.0 * Q / max(1, CLASSES - 1)) {
@@ -112,8 +113,8 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
             int included_literals = number_of_include_actions(ta_state);
 
             if (clause_output && abs(*clause_weight) < INT_MAX) {
-                (*clause_weight) += sign;
-                (*patch_weight) += sign;
+                (*clause_weight) += sign * weight_scaler;
+                (*patch_weight) += sign * weight_scaler;
             }
 
             // Type I Feedback
@@ -196,7 +197,7 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
 
 // Update state of Tsetlin Automata team
 __global__ void update(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *patch_weights,
-                       int *class_sum, int *X, int *y, int example) {
+                       int *weight_scaler, int *class_sum, int *X, int *y, int example) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -220,8 +221,9 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
             }
             if (clause_patch >= 0) patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
             update_clause(&localState, &clause_weights[class_id * CLAUSES + clause],
-                          &patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch], ta_state,
-                          clause_output, clause_patch, X, y[example * CLASSES + class_id], local_class_sum);
+                          &patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch],
+                          weight_scaler[class_id], ta_state, clause_output, clause_patch, X,
+                          y[example * CLASSES + class_id], local_class_sum);
         }
     }
 

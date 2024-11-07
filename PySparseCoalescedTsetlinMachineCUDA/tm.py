@@ -47,6 +47,7 @@ class CommonTsetlinMachine:
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        weight_scalar=None,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -60,6 +61,7 @@ class CommonTsetlinMachine:
         self.max_included_literals = max_included_literals
         self.boost_true_positive_feedback = boost_true_positive_feedback
         self.append_negated = append_negated
+        self.weight_scalar = None
         self.grid = grid
         self.block = block
 
@@ -82,6 +84,7 @@ class CommonTsetlinMachine:
         self.patch_weights_gpu = cuda.mem_alloc(
             self.number_of_outputs * self.number_of_clauses * self.number_of_patches * 4
         )
+        self.weight_scalar_gpu = cuda.mem_alloc(self.number_of_outputs * 4)
 
         self.included_literals_gpu = cuda.mem_alloc(
             self.number_of_clauses * self.number_of_features * 2 * 4
@@ -416,7 +419,7 @@ class CommonTsetlinMachine:
         # Update
         mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
         self.update = mod_update.get_function("update")
-        self.update.prepare("PPPPPPPi")
+        self.update.prepare("PPPPPPPPi")
 
         self.evaluate_update = mod_update.get_function("evaluate")
         self.evaluate_update.prepare("PPPP")
@@ -555,6 +558,11 @@ class CommonTsetlinMachine:
             self.initialized = True
             cuda.Context.synchronize()
 
+            if self.weight_scalar is None:
+                self.weight_scalar = np.ones((self.number_of_outputs), dtype=np.int32)
+
+            cuda.memcpy_htod(self.weight_scalar_gpu, self.weight_scalar)
+
         # If not incremental, clear ta-state and clause_weghts
         elif not incremental:
             self.prepare(
@@ -620,6 +628,7 @@ class CommonTsetlinMachine:
                     self.ta_state_gpu,
                     self.clause_weights_gpu,
                     self.patch_weights_gpu,
+                    self.weight_scalar_gpu,
                     self.class_sum_gpu,
                     self.encoded_X_gpu,
                     self.encoded_Y_gpu,
@@ -751,6 +760,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        weight_scalar=None,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -763,6 +773,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            weight_scalar=weight_scalar,
             grid=grid,
             block=block,
         )
@@ -818,6 +829,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        weight_scalar=None,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -830,6 +842,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            weight_scalar=weight_scalar,
             grid=grid,
             block=block,
         )
@@ -882,6 +895,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        weight_scalar=None,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -894,6 +908,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            weight_scalar=weight_scalar,
             grid=grid,
             block=block,
         )
@@ -943,6 +958,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        weight_scalar=None,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -955,6 +971,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            weight_scalar=weight_scalar,
             grid=grid,
             block=block,
         )
