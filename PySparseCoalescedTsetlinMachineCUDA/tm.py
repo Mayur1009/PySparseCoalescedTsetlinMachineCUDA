@@ -61,7 +61,7 @@ class CommonTsetlinMachine:
         self.max_included_literals = max_included_literals
         self.boost_true_positive_feedback = boost_true_positive_feedback
         self.append_negated = append_negated
-        self.weight_scalar = None
+        self.weight_scalar = np.array([]) if weight_scalar is None else np.array(weight_scalar)
         self.grid = grid
         self.block = block
 
@@ -558,7 +558,7 @@ class CommonTsetlinMachine:
             self.initialized = True
             cuda.Context.synchronize()
 
-            if self.weight_scalar is None:
+            if len(self.weight_scalar) == 0:
                 self.weight_scalar = np.ones((self.number_of_outputs), dtype=np.int32)
 
             cuda.memcpy_htod(self.weight_scalar_gpu, self.weight_scalar)
