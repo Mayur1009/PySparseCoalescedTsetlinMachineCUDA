@@ -559,7 +559,13 @@ class CommonTsetlinMachine:
             cuda.Context.synchronize()
 
             if len(self.weight_scalar) == 0:
-                self.weight_scalar = np.ones((self.number_of_outputs), dtype=np.int32)
+                self.weight_scalar = np.ones((self.number_of_outputs), dtype=np.uint32)
+            else:
+                self.weight_scalar = np.array(self.weight_scalar, dtype=np.uint32)
+
+            assert (
+                len(self.weight_scalar) == self.number_of_outputs
+            ), "Length of weight_scalar should same as number of classes."
 
             cuda.memcpy_htod(self.weight_scalar_gpu, self.weight_scalar)
 
