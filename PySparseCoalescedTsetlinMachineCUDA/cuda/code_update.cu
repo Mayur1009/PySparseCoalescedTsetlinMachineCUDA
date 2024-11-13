@@ -96,8 +96,9 @@ __device__ inline void calculate_clause_output(curandState *localState, unsigned
     }
 }
 
-__device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state,
-                                     int clause_output, int clause_patch, int *X, int y, int class_sum) {
+__device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state, int tp,
+                                     int tn, float s, int clause_output, int clause_patch, int *X, int y,
+                                     int class_sum) {
     int target = 1 - 2 * (class_sum > y);
 
     if (target == -1 && curand_uniform(localState) > 1.0 * Q / max(1, CLASSES - 1)) {
@@ -107,7 +108,7 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
     int sign = (*clause_weight >= 0) - (*clause_weight < 0);
 
     int absolute_prediction_error = abs(y - class_sum);
-    if (curand_uniform(localState) <= 1.0 * absolute_prediction_error / (2 * THRESHOLD)) {
+    if (curand_uniform(localState) <= 1.0 * absolute_prediction_error / (tp - tn)) {
         if (target * sign > 0) {
             int included_literals = number_of_include_actions(ta_state);
 
@@ -120,7 +121,7 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
                 // Generate random bit values
                 unsigned int la_feedback = 0;
                 for (int b = 0; b < INT_SIZE; ++b) {
-                    if (curand_uniform(localState) <= 1.0 / S) {
+                    if (curand_uniform(localState) <= 1.0 / s) {
                         la_feedback |= (1 << b);
                     }
                 }
@@ -220,15 +221,20 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
             for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id) {
                 if (group_id == GROUP_ID[class_id]) {
                     int local_class_sum = class_sum[class_id];
-                    if (local_class_sum > THRESHOLD) {
-                        local_class_sum = THRESHOLD;
-                    } else if (local_class_sum < -THRESHOLD) {
-                        local_class_sum = -THRESHOLD;
+                    if (local_class_sum > TP[group_id]) {
+                        local_class_sum = TP[group_id];
+                    } else if (local_class_sum < TN[group_id]) {
+                        local_class_sum = TN[group_id];
                     }
+                    int enc_y = y[example * CLASSES + class_id];
+                    if (enc_y > 0)
+                        enc_y = TP[group_id];
+                    else
+                        enc_y = TN[group_id];
                     if (clause_patch >= 0)
                         patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
-                    update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_output,
-                                  clause_patch, X, y[example * CLASSES + class_id], local_class_sum);
+                    update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, TP[group_id],
+                                  TN[group_id], S[group_id], clause_output, clause_patch, X, enc_y, local_class_sum);
                 }
             }
         }

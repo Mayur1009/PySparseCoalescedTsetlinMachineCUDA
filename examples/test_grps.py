@@ -35,7 +35,7 @@ Y_train, Y_test = Y_train_org, Y_test_org
 tm = MultiClassConvolutionalTsetlinMachine2D(
     clauses_1,
     T_1,
-    s,
+    [5.0, 100.0, 10.0],
     (28, 28, 1),
     (patch_size, patch_size),
     group_ids=[0, 1, 2, 2, 1, 2, 0, 1, 0, 0],
@@ -60,58 +60,58 @@ for i in range(epochs):
     )
 
 
-# literals = tm.get_literals()
-# M, N = tm.dim[0] - tm.patch_dim[0] + 1, tm.dim[1] - tm.patch_dim[1] + 1
-# num_loc_lits = M - 1 + N - 1
-# half_lits = tm.number_of_features // 2
-#
-# print(f"{literals.shape=}")
-#
-# grp_ids = tm.group_ids
-#
-# for c in range(10):
-#     weights = tm.get_weights()[c]
-#     patch_weights = tm.get_patch_weights()[c].reshape((tm.number_of_clauses, M, N))
-#
-#     avg_clause_img = np.zeros((2, 3, 28, 28))
-#
-#     for ci in tqdm(range(tm.number_of_clauses)):
-#         pos_lits = literals[grp_ids[c], ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
-#         neg_lits = literals[grp_ids[c], ci, half_lits + num_loc_lits :].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
-#
-#         tpos = np.zeros((28, 28))
-#         tneg = np.zeros((28, 28))
-#         teff = np.zeros((28, 28))
-#         pws = np.abs(patch_weights[ci].reshape(M * N))
-#         th = np.quantile(pws, 0.95)
-#
-#         for m in range(M):
-#             for n in range(N):
-#                 if np.abs(patch_weights[ci, m, n]) > th:
-#                     tpos[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += pos_lits * patch_weights[ci, m, n]
-#                     tneg[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += neg_lits * patch_weights[ci, m, n]
-#                     teff[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += (pos_lits - neg_lits).astype(
-#                         int
-#                     ) * patch_weights[ci, m, n]
-#
-#         polarity = (weights[ci] > 0) & 1
-#
-#         avg_clause_img[polarity, 0] = avg_clause_img[polarity, 0] + (
-#             tpos * abs(weights[ci]) - avg_clause_img[polarity, 0]
-#         ) / (tm.number_of_clauses + 1)
-#         avg_clause_img[polarity, 1] = avg_clause_img[polarity, 1] + (
-#             tneg * abs(weights[ci]) - avg_clause_img[polarity, 1]
-#         ) / (tm.number_of_clauses + 1)
-#         avg_clause_img[polarity, 2] = avg_clause_img[polarity, 2] + (
-#             teff * abs(weights[ci]) - avg_clause_img[polarity, 2]
-#         ) / (tm.number_of_clauses + 1)
-#
-#     fig, axs = plt.subplots(2, 3, squeeze=False, layout="compressed")
-#     for p in range(2):
-#         for t in range(3):
-#             axs[p - 1, t].imshow(avg_clause_img[p, t])
-#
-# plt.show()
+literals = tm.get_literals()
+M, N = tm.dim[0] - tm.patch_dim[0] + 1, tm.dim[1] - tm.patch_dim[1] + 1
+num_loc_lits = M - 1 + N - 1
+half_lits = tm.number_of_features // 2
+
+print(f"{literals.shape=}")
+
+grp_ids = tm.group_ids
+
+for c in range(10):
+    weights = tm.get_weights()[c]
+    patch_weights = tm.get_patch_weights()[c].reshape((tm.number_of_clauses, M, N))
+
+    avg_clause_img = np.zeros((2, 3, 28, 28))
+
+    for ci in tqdm(range(tm.number_of_clauses)):
+        pos_lits = literals[grp_ids[c], ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
+        neg_lits = literals[grp_ids[c], ci, half_lits + num_loc_lits :].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
+
+        tpos = np.zeros((28, 28))
+        tneg = np.zeros((28, 28))
+        teff = np.zeros((28, 28))
+        pws = np.abs(patch_weights[ci].reshape(M * N))
+        th = np.quantile(pws, 0.95)
+
+        for m in range(M):
+            for n in range(N):
+                if np.abs(patch_weights[ci, m, n]) > th:
+                    tpos[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += pos_lits * patch_weights[ci, m, n]
+                    tneg[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += neg_lits * patch_weights[ci, m, n]
+                    teff[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += (pos_lits - neg_lits).astype(
+                        int
+                    ) * patch_weights[ci, m, n]
+
+        polarity = (weights[ci] > 0) & 1
+
+        avg_clause_img[polarity, 0] = avg_clause_img[polarity, 0] + (
+            tpos * abs(weights[ci]) - avg_clause_img[polarity, 0]
+        ) / (tm.number_of_clauses + 1)
+        avg_clause_img[polarity, 1] = avg_clause_img[polarity, 1] + (
+            tneg * abs(weights[ci]) - avg_clause_img[polarity, 1]
+        ) / (tm.number_of_clauses + 1)
+        avg_clause_img[polarity, 2] = avg_clause_img[polarity, 2] + (
+            teff * abs(weights[ci]) - avg_clause_img[polarity, 2]
+        ) / (tm.number_of_clauses + 1)
+
+    fig, axs = plt.subplots(2, 3, squeeze=False, layout="compressed")
+    for p in range(2):
+        for t in range(3):
+            axs[p - 1, t].imshow(avg_clause_img[p, t])
+
+plt.show()
 
 
 

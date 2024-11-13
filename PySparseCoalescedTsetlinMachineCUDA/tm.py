@@ -39,15 +39,15 @@ g = curandom.XORWOWRandomNumberGenerator()
 class CommonTsetlinMachine:
     def __init__(
         self,
-        number_of_clauses,
-        T,
-        s,
-        q=1.0,
-        max_included_literals=None,
-        boost_true_positive_feedback=1,
-        number_of_state_bits=8,
-        append_negated=True,
-        group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
+        number_of_clauses: int,
+        T: int | list[int] | list[tuple[int, int]],
+        s: float | list[float],
+        q: float = 1.0,
+        max_included_literals: int | None = None,
+        boost_true_positive_feedback: int = 1,
+        number_of_state_bits: int = 8,
+        append_negated: bool = True,
+        group_ids: list = [],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -55,9 +55,9 @@ class CommonTsetlinMachine:
         self.number_of_clauses = number_of_clauses
         self.number_of_clause_chunks = (number_of_clauses - 1) / 32 + 1
         self.number_of_state_bits = number_of_state_bits
-        self.T = int(T)
+        self.T = T
         self.s = s
-        self.q = q
+        self.q = float(q)
         self.max_included_literals = max_included_literals
         self.boost_true_positive_feedback = boost_true_positive_feedback
         self.append_negated = append_negated
@@ -399,8 +399,6 @@ class CommonTsetlinMachine:
 #define FEATURES %d
 #define STATE_BITS %d
 #define BOOST_TRUE_POSITIVE_FEEDBACK %d
-#define S %f
-#define THRESHOLD %d
 #define Q %f
 #define MAX_INCLUDED_LITERALS %d
 #define NEGATIVE_CLAUSES %d
@@ -412,8 +410,6 @@ class CommonTsetlinMachine:
             self.number_of_features,
             self.number_of_state_bits,
             self.boost_true_positive_feedback,
-            self.s,
-            self.T,
             self.q,
             self.max_included_literals,
             self.negative_clauses,
@@ -421,9 +417,13 @@ class CommonTsetlinMachine:
             self.number_of_groups,
         )
 
-        parameters = (
-            f"{parameters}\n__device__ unsigned int GROUP_ID[CLASSES] = {{{','.join(self.group_ids.astype(str))}}};\n"
-        )
+        parameters = f"""
+            {parameters}
+            __device__ unsigned int GROUP_ID[CLASSES] = {{{','.join(self.group_ids.astype(str))}}};
+            __device__ float S[GROUPS] = {{{','.join(self.s.astype(str))}}};
+            __device__ int TP[GROUPS] = {{{','.join(self.Tp.astype(str))}}};
+            __device__ int TN[GROUPS] = {{{','.join(self.Tn.astype(str))}}};
+            """
 
         # Prepare
         mod_prepare = SourceModule(parameters + kernels.code_header + kernels.code_prepare, no_extern_c=True)
@@ -459,12 +459,47 @@ class CommonTsetlinMachine:
         self.get_literals_gpu = mod_clauses.get_function("get_literals")
         self.get_literals_gpu.prepare("PP")
 
-    def _init_fit(self):
+    def _validate_args(self):
         if len(self.group_ids) == 0:
             self.group_ids = np.array([0] * self.number_of_outputs, dtype=int)
 
         assert len(self.group_ids) == self.number_of_outputs, "Number of groups should be equal to number of classes"
         self.number_of_groups = int(np.max(self.group_ids) + 1)  # int() is important, dont know why
+
+        if isinstance(self.s, float):
+            self.s = np.array([self.s] * self.number_of_groups, dtype=float)
+        else:
+            self.s = np.array(self.s, dtype=float)
+
+        if isinstance(self.T, int):
+            self.Tp = np.array([self.T] * self.number_of_groups, dtype=int)
+            self.Tn = np.array([-self.T] * self.number_of_groups, dtype=int)
+        elif isinstance(self.T, list):
+            Tp, Tn = [], []
+            for v in list(self.T):
+                if isinstance(v, tuple):
+                    Tn.append(v[0])
+                    Tp.append(v[1])
+                else:
+                    Tp.append(v)
+                    Tn.append(-v)
+
+            self.Tp = np.array(Tp, dtype=int)
+            self.Tn = np.array(Tn, dtype=int)
+
+
+        assert (
+            len(self.s) == self.number_of_groups
+        ), "s should be float or list of floats with length equal to number of groups."
+        assert (
+            len(self.Tp) == self.number_of_groups
+        ), "Something wrong with T, Tp should be float or list of floats with length equal to number of groups."
+        assert (
+            len(self.Tn) == self.number_of_groups
+        ), "Something wrong with T,Tn should be float or list of floats with length equal to number of groups."
+
+    def _init_fit(self):
+        self._validate_args()
 
         if self.append_negated:
             self.number_of_features = (
@@ -809,7 +844,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
         encoded_Y = np.empty((Y.shape[0], self.number_of_outputs), dtype=np.int32)
         for i in range(self.number_of_outputs):
-            encoded_Y[:, i] = np.where(Y == i, self.T, -self.T)
+            encoded_Y[:, i] = np.where(Y == i, 1, 0)
 
         self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
@@ -876,7 +911,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         self.max_y = None
         self.min_y = None
 
-        encoded_Y = np.where(Y == 1, self.T, -self.T).astype(np.int32)
+        encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
 
         self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
@@ -939,7 +974,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
         self.max_y = None
         self.min_y = None
 
-        encoded_Y = np.where(Y == 1, self.T, -self.T).astype(np.int32)
+        encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
         self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
         return
@@ -1004,7 +1039,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 
         encoded_Y = np.empty((Y.shape[0], self.number_of_outputs), dtype=np.int32)
         for i in range(self.number_of_outputs):
-            encoded_Y[:, i] = np.where(Y == i, self.T, -self.T)
+            encoded_Y[:, i] = np.where(Y == i, 1, 0)
 
         self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
@@ -1062,7 +1097,7 @@ class TsetlinMachine(CommonTsetlinMachine):
         self.max_y = None
         self.min_y = None
 
-        encoded_Y = np.where(Y == 1, self.T, -self.T).astype(np.int32)
+        encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
 
         self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
@@ -1082,6 +1117,7 @@ class TsetlinMachine(CommonTsetlinMachine):
             return preds
 
 
+# FIXME: Broken because of Multiple T values.
 class RegressionTsetlinMachine(CommonTsetlinMachine):
     def __init__(
         self,
