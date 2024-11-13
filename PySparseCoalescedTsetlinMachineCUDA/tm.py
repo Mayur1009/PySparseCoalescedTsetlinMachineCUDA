@@ -47,6 +47,7 @@ class CommonTsetlinMachine:
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -69,13 +70,14 @@ class CommonTsetlinMachine:
         self.ta_state = np.array([])
         self.clause_weights = np.array([])
         self.patch_weights = np.array([])
+        self.group_ids = np.array(group_ids, dtype=int)
 
         self.negative_clauses = 1  # Default is 1, set to 0 in RegressionTsetlinMachine
         self.initialized = False
 
     def allocate_gpu_memory(self):
         self.ta_state_gpu = cuda.mem_alloc(
-            self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4
+            self.number_of_groups * self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4
         )
         self.clause_weights_gpu = cuda.mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
         self.class_sum_gpu = cuda.mem_alloc(self.number_of_outputs * 4)
@@ -84,17 +86,17 @@ class CommonTsetlinMachine:
         )
 
         self.included_literals_gpu = cuda.mem_alloc(
-            self.number_of_clauses * self.number_of_features * 2 * 4
+            self.number_of_groups * self.number_of_clauses * self.number_of_features * 2 * 4
         )  # Contains index and state of included literals per clause, none at start
         self.included_literals_length_gpu = cuda.mem_alloc(
-            self.number_of_clauses * 4
+            self.number_of_groups * self.number_of_clauses * 4
         )  # Number of included literals per clause
 
         self.excluded_literals_gpu = cuda.mem_alloc(
-            self.number_of_clauses * self.number_of_features * 2 * 4
+            self.number_of_groups * self.number_of_clauses * self.number_of_features * 2 * 4
         )  # Contains index and state of excluded literals per clause
         self.excluded_literals_length_gpu = cuda.mem_alloc(
-            self.number_of_clauses * 4
+            self.number_of_groups * self.number_of_clauses * 4
         )  # Number of excluded literals per clause
 
     def ta_action(self, clause, ta):
@@ -107,7 +109,7 @@ class CommonTsetlinMachine:
         return (ta_state[clause, ta // 32, self.number_of_state_bits - 1] & (1 << (ta % 32))) > 0
 
     def get_literals(self):
-        literals_gpu = cuda.mem_alloc(self.number_of_clauses * self.number_of_features * 4)
+        literals_gpu = cuda.mem_alloc(self.number_of_groups * self.number_of_clauses * self.number_of_features * 4)
         self.get_literals_gpu(
             self.ta_state_gpu,
             literals_gpu,
@@ -116,9 +118,11 @@ class CommonTsetlinMachine:
         )
         cuda.Context.synchronize()
 
-        literals = np.empty((self.number_of_clauses * self.number_of_features), dtype=np.uint32)
+        literals = np.empty((self.number_of_groups * self.number_of_clauses * self.number_of_features), dtype=np.uint32)
         cuda.memcpy_dtoh(literals, literals_gpu)
-        return literals.reshape((self.number_of_clauses, self.number_of_features)).astype(np.uint8)
+        return literals.reshape((self.number_of_groups, self.number_of_clauses, self.number_of_features)).astype(
+            np.uint8
+        )
 
     def get_weights(self):
         self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
@@ -202,7 +206,7 @@ class CommonTsetlinMachine:
 
     # Transform input data for processing at next layer
     def transform(self, X) -> csr_matrix:
-        """Returns csr_matix of clause outputs. Array shape: (num_samples, num_clauses)"""
+        """Returns csr_matix of clause outputs. Array shape: (num_groups, num_samples, num_clauses)"""
         if not self.initialized:
             print("Error: Model not trained.")
             sys.exit(-1)
@@ -216,8 +220,8 @@ class CommonTsetlinMachine:
         cuda.memcpy_htod(X_indptr_gpu, X.indptr)
         cuda.memcpy_htod(X_indices_gpu, X.indices)
 
-        X_transformed = np.empty((number_of_examples, self.number_of_clauses), dtype=np.uint32)
-        X_transformed_gpu = cuda.mem_alloc(self.number_of_clauses * 4)
+        X_transformed = np.empty((number_of_examples, self.number_of_groups * self.number_of_clauses), dtype=np.uint32)
+        X_transformed_gpu = cuda.mem_alloc(self.number_of_groups * self.number_of_clauses * 4)
 
         self.prepare_packed(
             g.state,
@@ -296,8 +300,11 @@ class CommonTsetlinMachine:
         cuda.memcpy_htod(X_indices_gpu, X.indices)
 
         # Array to capture output from gpu
-        X_transformed = np.empty((number_of_examples, self.number_of_clauses * self.number_of_patches), dtype=np.uint32)
-        X_transformed_gpu = cuda.mem_alloc(self.number_of_clauses * self.number_of_patches * 4)
+        X_transformed = np.empty(
+            (number_of_examples, self.number_of_groups * self.number_of_clauses * self.number_of_patches),
+            dtype=np.uint32,
+        )
+        X_transformed_gpu = cuda.mem_alloc(self.number_of_groups * self.number_of_clauses * self.number_of_patches * 4)
 
         self.prepare_packed(
             g.state,
@@ -358,7 +365,11 @@ class CommonTsetlinMachine:
             )
 
         # NOTE: RETURNS CSR_MATRIX
-        return csr_matrix(X_transformed.reshape((number_of_examples, self.number_of_clauses * self.number_of_patches)))
+        return csr_matrix(
+            X_transformed.reshape(
+                (number_of_examples, self.number_of_groups * self.number_of_clauses * self.number_of_patches)
+            )
+        )
 
     def init_gpu(self):
         self._init_gpu_code()
@@ -394,6 +405,7 @@ class CommonTsetlinMachine:
 #define MAX_INCLUDED_LITERALS %d
 #define NEGATIVE_CLAUSES %d
 #define PATCHES %d
+#define GROUPS %d
 """ % (
             self.number_of_outputs,
             self.number_of_clauses,
@@ -406,6 +418,11 @@ class CommonTsetlinMachine:
             self.max_included_literals,
             self.negative_clauses,
             self.number_of_patches,
+            self.number_of_groups,
+        )
+
+        parameters = (
+            f"{parameters}\n__device__ unsigned int GROUP_ID[CLASSES] = {{{','.join(self.group_ids.astype(str))}}};\n"
         )
 
         # Prepare
@@ -443,6 +460,12 @@ class CommonTsetlinMachine:
         self.get_literals_gpu.prepare("PP")
 
     def _init_fit(self):
+        if len(self.group_ids) == 0:
+            self.group_ids = np.array([0] * self.number_of_outputs, dtype=int)
+
+        assert len(self.group_ids) == self.number_of_outputs, "Number of groups should be equal to number of classes"
+        self.number_of_groups = int(np.max(self.group_ids) + 1)  # int() is important, dont know why
+
         if self.append_negated:
             self.number_of_features = (
                 int(
@@ -751,6 +774,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -763,6 +787,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            group_ids=group_ids,
             grid=grid,
             block=block,
         )
@@ -818,6 +843,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -830,6 +856,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            group_ids=group_ids,
             grid=grid,
             block=block,
         )
@@ -882,6 +909,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -894,6 +922,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            group_ids=group_ids,
             grid=grid,
             block=block,
         )
@@ -943,6 +972,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -955,6 +985,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            group_ids=group_ids,
             grid=grid,
             block=block,
         )
@@ -1003,6 +1034,7 @@ class TsetlinMachine(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -1015,6 +1047,7 @@ class TsetlinMachine(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            group_ids=group_ids,
             grid=grid,
             block=block,
         )
@@ -1059,6 +1092,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -1070,6 +1104,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            group_ids=group_ids,
             grid=grid,
             block=block,
         )
@@ -1101,7 +1136,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
             return preds
 
 
-# FIXME: Broken because of patch_weights.
+# FIXME: Broken because of patch_weights and other things.
 class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
     def __init__(
         self,
@@ -1148,7 +1183,8 @@ class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
                 block=self.block,
             )
             cuda.Context.synchronize()
-        elif incremental == False:
+
+        elif not incremental:
             self.prepare(
                 g.state,
                 self.ta_state_gpu,

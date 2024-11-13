@@ -8,19 +8,20 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
 
     for (unsigned long long clause = index; clause < CLAUSES; clause += stride) {
         for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id) {
-#if NEGATIVE_CLAUSES == 1
-            clause_weights[class_id * CLAUSES + clause] = 1 - 2 * (curand(&localState) % 2);
-#else
-            clause_weights[class_id * CLAUSES + clause] = 1;
-#endif
-        }
+            if (NEGATIVE_CLAUSES)
+                clause_weights[class_id * CLAUSES + clause] = 1 - 2 * (curand(&localState) % 2);
+            else
+                clause_weights[class_id * CLAUSES + clause] = 1;
 
-        unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
-        for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
-            for (int b = 0; b < STATE_BITS - 1; ++b) {
-                ta_state[la_chunk * STATE_BITS + b] = ~0;
+            int group_id = GROUP_ID[class_id];
+            unsigned int *ta_state =
+                &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
+            for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
+                for (int b = 0; b < STATE_BITS - 1; ++b) {
+                    ta_state[la_chunk * STATE_BITS + b] = ~0;
+                }
+                ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] = 0;
             }
-            ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] = 0;
         }
     }
 
@@ -36,16 +37,20 @@ __global__ void prepare_packed(curandState *state, unsigned int *global_ta_state
     curandState localState = state[index];
 
     for (unsigned long long clause = index; clause < CLAUSES; clause += stride) {
-        unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
+        for (unsigned int group_id = 0; group_id < GROUPS; group_id++) {
+            unsigned int *ta_state =
+                &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
 
-        included_literals_length[clause] = 0;
-        for (int literal = 0; literal < FEATURES; ++literal) {
-            int chunk = literal / INT_SIZE;
-            int pos = literal % INT_SIZE;
+            included_literals_length[group_id * CLAUSES + clause] = 0;
+            for (int literal = 0; literal < FEATURES; ++literal) {
+                int chunk = literal / INT_SIZE;
+                int pos = literal % INT_SIZE;
 
-            if ((ta_state[chunk * STATE_BITS + STATE_BITS - 1] & (1U << pos)) > 0) {
-                included_literals[clause * FEATURES * 2 + included_literals_length[clause] * 2] = literal;
-                included_literals_length[clause]++;
+                if ((ta_state[chunk * STATE_BITS + STATE_BITS - 1] & (1U << pos)) > 0) {
+                    included_literals[group_id * CLAUSES * FEATURES * 2 + clause * FEATURES * 2 +
+                                      included_literals_length[group_id * CLAUSES + clause] * 2] = literal;
+                    included_literals_length[group_id * CLAUSES + clause]++;
+                }
             }
         }
     }

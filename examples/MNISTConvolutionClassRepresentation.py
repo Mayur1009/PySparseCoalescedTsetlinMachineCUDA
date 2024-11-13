@@ -49,83 +49,14 @@ for i in range(epochs):
 X = X_train[:2]
 Y = Y_train_org[:2]
 literals = tm.get_literals()
-weights = tm.get_weights()
-print(f"{weights.shape=}")
-clause_outputs = tm.transform(X)
-patch_outputs = tm.transform_patchwise(X)
-
-clause_outputs = np.array(clause_outputs.todense()).reshape((2, tm.number_of_clauses))
 
 M, N = tm.dim[0] - tm.patch_dim[0] + 1, tm.dim[1] - tm.patch_dim[1] + 1
-patch_outputs = np.array(patch_outputs.todense()).reshape((2, tm.number_of_clauses, M, N))
 
 num_loc_lits = M - 1 + N - 1
 half_lits = tm.number_of_features // 2
+grp_ids = tm.group_ids
 
 print(f"{literals.shape=}")
-print(f"{clause_outputs.shape=}")
-print(f"{patch_outputs.shape=}")
-
-for e in range(2):
-    print(f"{Y[e]=}")
-    tot_active = 0
-
-    pimg = np.zeros((28, 28))
-    nimg = np.zeros((28, 28))
-    eimg = np.zeros((28, 28))
-    pwimg = np.zeros((28, 28))
-    nwimg = np.zeros((28, 28))
-    ewimg = np.zeros((28, 28))
-    for ci in range(tm.number_of_clauses):
-        pos_lits = literals[ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1]))
-        neg_lits = literals[ci, half_lits + num_loc_lits :].reshape((tm.patch_dim[0], tm.patch_dim[1]))
-
-        tpos = np.zeros((28, 28))
-        tneg = np.zeros((28, 28))
-
-        w = weights[Y[e], ci]
-        if w >= 0:
-            tot_active += 1
-
-            for m in range(M):
-                for n in range(N):
-                    if patch_outputs[e, ci, m, n] == 1:
-                        tpos[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += pos_lits
-                        tneg[m : m + tm.patch_dim[0], n : n + tm.patch_dim[1]] += neg_lits
-
-            # tpos = (tpos > 0) & 1
-            # tneg = (tneg > 0) & 1
-
-            pimg += tpos
-            nimg += tneg
-            eimg += tpos - tneg
-            pwimg += tpos * w
-            nwimg += tneg * w
-            ewimg += (tpos - tneg) * w
-
-    print(f"{tot_active=}")
-    tot_active = tot_active if tot_active > 0 else 1
-    # pimg /= tot_active
-    # nimg /= tot_active
-    # eimg /= tot_active
-    # pwimg /= tot_active
-    # nwimg /= tot_active
-    # ewimg /= tot_active
-
-    fig, axs = plt.subplots(2, 4, squeeze=False, layout="compressed")
-
-    axs[0, 0].imshow(X[e].reshape(28, 28))
-    axs[0, 1].imshow(pimg)
-    axs[0, 2].imshow(nimg)
-    axs[0, 3].imshow(eimg)
-    axs[1, 1].imshow(pwimg)
-    axs[1, 2].imshow(nwimg)
-    axs[1, 3].imshow(ewimg)
-    plt.show()
-
-# patch_weights = tm.get_patch_weights()
-# print(f'{patch_weights.shape=}')
-
 
 for c in range(10):
     weights = tm.get_weights()[c]
@@ -134,8 +65,14 @@ for c in range(10):
     avg_clause_img = np.zeros((2, 3, 28, 28))
 
     for ci in tqdm(range(tm.number_of_clauses)):
-        pos_lits = literals[ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
-        neg_lits = literals[ci, half_lits + num_loc_lits :].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
+        pos_lits = (
+            literals[grp_ids[c], ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
+        )
+        neg_lits = (
+            literals[grp_ids[c], ci, half_lits + num_loc_lits :]
+            .reshape((tm.patch_dim[0], tm.patch_dim[1]))
+            .astype(np.int8)
+        )
 
         tpos = np.zeros((28, 28))
         tneg = np.zeros((28, 28))
