@@ -59,10 +59,12 @@ patch_outputs = np.array(patch_outputs.todense()).reshape((2, tm.number_of_claus
 num_loc_lits = M - 1 + N - 1
 half_lits = tm.number_of_features // 2
 
+grp_ids = tm.group_ids
 print(f"{literals.shape=}")
 print(f"{patch_outputs.shape=}")
 
 for e in range(2):
+    c = Y[e]
     print(f"{Y[e]=}")
     tot_active = 0
     po = 0
@@ -74,8 +76,8 @@ for e in range(2):
     nwimg = np.zeros((28, 28))
     ewimg = np.zeros((28, 28))
     for ci in range(tm.number_of_clauses):
-        pos_lits = literals[ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1]))
-        neg_lits = literals[ci, half_lits + num_loc_lits :].reshape((tm.patch_dim[0], tm.patch_dim[1]))
+        pos_lits = literals[grp_ids[c], ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1]))
+        neg_lits = literals[grp_ids[c], ci, half_lits + num_loc_lits :].reshape((tm.patch_dim[0], tm.patch_dim[1]))
 
         tpos = np.zeros((28, 28))
         tneg = np.zeros((28, 28))
