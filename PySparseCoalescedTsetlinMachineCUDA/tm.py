@@ -429,9 +429,9 @@ class CommonTsetlinMachine:
         parameters = f"""
             {parameters}
             __device__ unsigned int GROUP_ID[CLASSES] = {{{','.join(self.group_ids.astype(str))}}};
-            __device__ float S[GROUPS] = {{{','.join(self.s.astype(str))}}};
-            __device__ int TP[GROUPS] = {{{','.join(self.Tp.astype(str))}}};
-            __device__ int TN[GROUPS] = {{{','.join(self.Tn.astype(str))}}};
+            __device__ float S[CLASSES] = {{{','.join(self.s.astype(str))}}};
+            __device__ int TP[CLASSES] = {{{','.join(self.Tp.astype(str))}}};
+            __device__ int TN[CLASSES] = {{{','.join(self.Tn.astype(str))}}};
             __device__ int WEIGHT_UPDATE_FACTOR[CLASSES] = {{{','.join(self.weight_update_factor.astype(str))}}};
             __device__ int STATE_INC_FACTOR[CLASSES] = {{{','.join(self.state_inc_factor.astype(str))}}};
         """
@@ -489,13 +489,13 @@ class CommonTsetlinMachine:
         self.number_of_groups = int(np.max(self.group_ids) + 1)  # int() is important, dont know why
 
         if isinstance(self.s, float) or isinstance(self.s, int):
-            self.s = np.array([self.s] * self.number_of_groups, dtype=float)
+            self.s = np.array([self.s] * self.number_of_outputs, dtype=float)
         else:
             self.s = np.array(self.s, dtype=float)
 
         if isinstance(self.T, int):
-            self.Tp = np.array([self.T] * self.number_of_groups, dtype=int)
-            self.Tn = np.array([-self.T] * self.number_of_groups, dtype=int)
+            self.Tp = np.array([self.T] * self.number_of_outputs, dtype=int)
+            self.Tn = np.array([-self.T] * self.number_of_outputs, dtype=int)
         elif isinstance(self.T, list):
             Tp, Tn = [], []
             for v in list(self.T):
@@ -510,13 +510,13 @@ class CommonTsetlinMachine:
             self.Tn = np.array(Tn, dtype=int)
 
         assert (
-            len(self.s) == self.number_of_groups
+            len(self.s) == self.number_of_outputs
         ), "s should be float or list of floats with length equal to number of groups."
         assert (
-            len(self.Tp) == self.number_of_groups
+            len(self.Tp) == self.number_of_outputs
         ), "Something wrong with T, Tp should be float or list of floats with length equal to number of groups."
         assert (
-            len(self.Tn) == self.number_of_groups
+            len(self.Tn) == self.number_of_outputs
         ), "Something wrong with T,Tn should be float or list of floats with length equal to number of groups."
 
     def _init_fit(self):

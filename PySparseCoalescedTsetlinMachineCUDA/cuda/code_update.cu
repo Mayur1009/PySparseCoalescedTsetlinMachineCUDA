@@ -227,22 +227,22 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
         for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id) {
             if (group_id == GROUP_ID[class_id]) {
                 int local_class_sum = class_sum[class_id];
-                if (local_class_sum > TP[group_id]) {
-                    local_class_sum = TP[group_id];
-                } else if (local_class_sum < TN[group_id]) {
-                    local_class_sum = TN[group_id];
+                if (local_class_sum > TP[class_id]) {
+                    local_class_sum = TP[class_id];
+                } else if (local_class_sum < TN[class_id]) {
+                    local_class_sum = TN[class_id];
                 }
                 int enc_y = y[example * CLASSES + class_id];
                 if (enc_y > 0)
-                    enc_y = TP[group_id];
+                    enc_y = TP[class_id];
                 else
-                    enc_y = TN[group_id];
+                    enc_y = TN[class_id];
 
                 if (clause_patch >= 0)
                     patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
 
-                update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, TP[group_id],
-                              TN[group_id], S[group_id], clause_output, clause_patch, X, enc_y, local_class_sum,
+                update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, TP[class_id],
+                              TN[class_id], S[class_id], clause_output, clause_patch, X, enc_y, local_class_sum,
                               WEIGHT_UPDATE_FACTOR[class_id], STATE_INC_FACTOR[class_id]);
             }
         }
