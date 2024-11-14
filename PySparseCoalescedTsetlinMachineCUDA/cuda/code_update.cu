@@ -17,22 +17,25 @@ __device__ inline int number_of_include_actions(unsigned int *ta_state) {
 
 // Increment the states of each of those 32 Tsetlin Automata flagged in the
 // active bit vector.
-__device__ inline void inc(unsigned int *ta_state, int clause, int chunk, unsigned int active) {
+__device__ inline void inc(unsigned int *ta_state, int clause, int chunk, unsigned int active,
+                           unsigned int factor = 1) {
     unsigned int carry, carry_next;
     int id = clause * LA_CHUNKS * STATE_BITS + chunk * STATE_BITS;
     carry = active;
-    for (int b = 0; b < STATE_BITS; ++b) {
-        if (carry == 0) break;
-
-        carry_next = ta_state[id + b] & carry;        // Sets carry bits (overflow)
-                                                      // passing on to next bit
-        ta_state[id + b] = ta_state[id + b] ^ carry;  // Performs increments with XOR
-        carry = carry_next;
-    }
-
-    if (carry > 0) {
+    for (int f = 0; f < factor; f++) {
         for (int b = 0; b < STATE_BITS; ++b) {
-            ta_state[id + b] |= carry;
+            if (carry == 0) break;
+
+            carry_next = ta_state[id + b] & carry;        // Sets carry bits (overflow)
+                                                          // passing on to next bit
+            ta_state[id + b] = ta_state[id + b] ^ carry;  // Performs increments with XOR
+            carry = carry_next;
+        }
+
+        if (carry > 0) {
+            for (int b = 0; b < STATE_BITS; ++b) {
+                ta_state[id + b] |= carry;
+            }
         }
     }
 }
@@ -97,8 +100,8 @@ __device__ inline void calculate_clause_output(curandState *localState, unsigned
 }
 
 __device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state, int tp,
-                                     int tn, float s, int clause_output, int clause_patch, int *X, int y,
-                                     int class_sum) {
+                                     int tn, float s, int clause_output, int clause_patch, int *X, int y, int class_sum,
+                                     unsigned int weight_factor = 1, unsigned int state_inc_factor = 1) {
     int target = 1 - 2 * (class_sum > y);
 
     if (target == -1 && curand_uniform(localState) > 1.0 * Q / max(1, CLASSES - 1)) {
@@ -113,7 +116,7 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
             int included_literals = number_of_include_actions(ta_state);
 
             if (clause_output && abs(*clause_weight) < INT_MAX) {
-                (*clause_weight) += sign;
+                (*clause_weight) += sign * weight_factor;
             }
 
             // Type I Feedback
@@ -130,7 +133,8 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
 #if BOOST_TRUE_POSITIVE_FEEDBACK == 1
                     inc(ta_state, 0, la_chunk, X[clause_patch * LA_CHUNKS + la_chunk]);
 #else
-                    inc(ta_state, 0, la_chunk, X[clause_patch * LA_CHUNKS + la_chunk] & (~la_feedback));
+                    inc(ta_state, 0, la_chunk, X[clause_patch * LA_CHUNKS + la_chunk] & (~la_feedback),
+                        state_inc_factor);
 #endif
 
                     dec(ta_state, 0, la_chunk, (~X[clause_patch * LA_CHUNKS + la_chunk]) & la_feedback);
@@ -150,7 +154,8 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
 
             for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
                 inc(ta_state, 0, la_chunk,
-                    (~X[clause_patch * LA_CHUNKS + la_chunk]) & (~ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]));
+                    (~X[clause_patch * LA_CHUNKS + la_chunk]) & (~ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]),
+                    state_inc_factor);
             }
         }
     }
@@ -232,10 +237,13 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
                     enc_y = TP[group_id];
                 else
                     enc_y = TN[group_id];
+
                 if (clause_patch >= 0)
                     patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
+
                 update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, TP[group_id],
-                              TN[group_id], S[group_id], clause_output, clause_patch, X, enc_y, local_class_sum);
+                              TN[group_id], S[group_id], clause_output, clause_patch, X, enc_y, local_class_sum,
+                              WEIGHT_UPDATE_FACTOR[class_id], STATE_INC_FACTOR[class_id]);
             }
         }
     }

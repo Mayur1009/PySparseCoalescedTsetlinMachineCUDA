@@ -7,7 +7,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from PySparseCoalescedTsetlinMachineCUDA.tm import MultiClassConvolutionalTsetlinMachine2D
 
-clauses_1 = int(250)
+clauses_1 = int(1000)
 s = 10
 T_1 = int(clauses_1 * 0.8)
 
@@ -35,10 +35,12 @@ Y_train, Y_test = Y_train_org, Y_test_org
 tm = MultiClassConvolutionalTsetlinMachine2D(
     clauses_1,
     T_1,
-    [10, 50, 30, 5, 70],
+    s,
     (28, 28, 1),
     (patch_size, patch_size),
-    group_ids=[0, 1, 2, 3, 4, 0, 1, 2, 3, 4],
+    group_ids=[],
+    weight_update_factor=[5, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    state_inc_factor=[5, 1, 1, 1, 1, 1, 1, 1, 1, 1],
 )
 
 for i in range(epochs):
