@@ -147,7 +147,7 @@ class CommonTsetlinMachine:
 
     def get_state(self):
         self.ta_state = np.empty(
-            self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits, dtype=np.uint32
+            self.number_of_groups * self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits, dtype=np.uint32
         )
         self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
         self.patch_weights = np.empty(
@@ -172,6 +172,8 @@ class CommonTsetlinMachine:
             self.min_y,
             self.max_y,
             self.patch_weights,
+            self.number_of_groups,
+            self.group_ids
         )
 
     def set_state(self, state):
@@ -186,6 +188,8 @@ class CommonTsetlinMachine:
         self.append_negated = state[10]
         self.min_y = state[11]
         self.max_y = state[12]
+        self.number_of_groups = state[14]
+        self.group_ids = state[15]
 
         self._init_fit()
         self.init_gpu()
