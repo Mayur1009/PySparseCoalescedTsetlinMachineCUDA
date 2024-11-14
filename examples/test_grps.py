@@ -7,8 +7,8 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from PySparseCoalescedTsetlinMachineCUDA.tm import MultiClassConvolutionalTsetlinMachine2D
 
-clauses_1 = int(850)
-s = 10.0
+clauses_1 = int(250)
+s = 10
 T_1 = int(clauses_1 * 0.8)
 
 epochs = 1
@@ -35,10 +35,10 @@ Y_train, Y_test = Y_train_org, Y_test_org
 tm = MultiClassConvolutionalTsetlinMachine2D(
     clauses_1,
     T_1,
-    [5.0, 100.0, 10.0],
+    [10, 50, 30, 5, 70],
     (28, 28, 1),
     (patch_size, patch_size),
-    group_ids=[0, 1, 2, 2, 1, 2, 0, 1, 0, 0],
+    group_ids=[0, 1, 2, 3, 4, 0, 1, 2, 3, 4],
 )
 
 for i in range(epochs):
@@ -76,8 +76,14 @@ for c in range(10):
     avg_clause_img = np.zeros((2, 3, 28, 28))
 
     for ci in tqdm(range(tm.number_of_clauses)):
-        pos_lits = literals[grp_ids[c], ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
-        neg_lits = literals[grp_ids[c], ci, half_lits + num_loc_lits :].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
+        pos_lits = (
+            literals[grp_ids[c], ci, num_loc_lits:half_lits].reshape((tm.patch_dim[0], tm.patch_dim[1])).astype(np.int8)
+        )
+        neg_lits = (
+            literals[grp_ids[c], ci, half_lits + num_loc_lits :]
+            .reshape((tm.patch_dim[0], tm.patch_dim[1]))
+            .astype(np.int8)
+        )
 
         tpos = np.zeros((28, 28))
         tneg = np.zeros((28, 28))
@@ -112,8 +118,6 @@ for c in range(10):
             axs[p - 1, t].imshow(avg_clause_img[p, t])
 
 plt.show()
-
-
 
 
 # X = X_train[:2]

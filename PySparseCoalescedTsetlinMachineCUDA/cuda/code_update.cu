@@ -161,38 +161,38 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
-    for (int clause = index; clause < CLAUSES; clause += stride) {
-        for (int group_id = 0; group_id < GROUPS; group_id++) {
-            unsigned int *ta_state =
-                &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
+    for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
+        int group_id = combined_clause_id / CLAUSES;
+        int clause = combined_clause_id % CLAUSES;
+        unsigned int *ta_state =
+            &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
 
-            int clause_output;
-            for (int patch = 0; patch < PATCHES; ++patch) {
-                clause_output = 1;
-                for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
-                    if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + la_chunk]) !=
-                        ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]) {
-                        clause_output = 0;
-                        break;
-                    }
-                }
-
-                if ((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + LA_CHUNKS - 1] &
-                     FILTER) != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & FILTER)) {
+        int clause_output;
+        for (int patch = 0; patch < PATCHES; ++patch) {
+            clause_output = 1;
+            for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
+                if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + la_chunk]) !=
+                    ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]) {
                     clause_output = 0;
-                }
-
-                if (clause_output) {
                     break;
                 }
             }
 
+            if ((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + LA_CHUNKS - 1] &
+                 FILTER) != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & FILTER)) {
+                clause_output = 0;
+            }
+
             if (clause_output) {
-                for (int class_id = 0; class_id < CLASSES; ++class_id) {
-                    if (group_id == GROUP_ID[class_id]) {
-                        int clause_weight = clause_weights[class_id * CLAUSES + clause];
-                        atomicAdd(&class_sum[class_id], clause_weight);
-                    }
+                break;
+            }
+        }
+
+        if (clause_output) {
+            for (int class_id = 0; class_id < CLASSES; ++class_id) {
+                if (group_id == GROUP_ID[class_id]) {
+                    int clause_weight = clause_weights[class_id * CLAUSES + clause];
+                    atomicAdd(&class_sum[class_id], clause_weight);
                 }
             }
         }
@@ -209,33 +209,33 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
     curandState localState = state[index];
 
     // Calculate clause output first
-    for (unsigned long long clause = index; clause < CLAUSES; clause += stride) {
-        for (int group_id = 0; group_id < GROUPS; group_id++) {
-            unsigned int *ta_state =
-                &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
+    for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
+        int group_id = combined_clause_id / CLAUSES;
+        int clause = combined_clause_id % CLAUSES;
+        unsigned int *ta_state =
+            &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
 
-            unsigned int clause_output;
-            int clause_patch;
-            calculate_clause_output(&localState, ta_state, &clause_output, &clause_patch, X);
+        unsigned int clause_output;
+        int clause_patch;
+        calculate_clause_output(&localState, ta_state, &clause_output, &clause_patch, X);
 
-            for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id) {
-                if (group_id == GROUP_ID[class_id]) {
-                    int local_class_sum = class_sum[class_id];
-                    if (local_class_sum > TP[group_id]) {
-                        local_class_sum = TP[group_id];
-                    } else if (local_class_sum < TN[group_id]) {
-                        local_class_sum = TN[group_id];
-                    }
-                    int enc_y = y[example * CLASSES + class_id];
-                    if (enc_y > 0)
-                        enc_y = TP[group_id];
-                    else
-                        enc_y = TN[group_id];
-                    if (clause_patch >= 0)
-                        patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
-                    update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, TP[group_id],
-                                  TN[group_id], S[group_id], clause_output, clause_patch, X, enc_y, local_class_sum);
+        for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id) {
+            if (group_id == GROUP_ID[class_id]) {
+                int local_class_sum = class_sum[class_id];
+                if (local_class_sum > TP[group_id]) {
+                    local_class_sum = TP[group_id];
+                } else if (local_class_sum < TN[group_id]) {
+                    local_class_sum = TN[group_id];
                 }
+                int enc_y = y[example * CLASSES + class_id];
+                if (enc_y > 0)
+                    enc_y = TP[group_id];
+                else
+                    enc_y = TN[group_id];
+                if (clause_patch >= 0)
+                    patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
+                update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, TP[group_id],
+                              TN[group_id], S[group_id], clause_output, clause_patch, X, enc_y, local_class_sum);
             }
         }
     }

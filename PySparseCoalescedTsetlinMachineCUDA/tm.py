@@ -470,7 +470,7 @@ class CommonTsetlinMachine:
         assert len(self.group_ids) == self.number_of_outputs, "Number of groups should be equal to number of classes"
         self.number_of_groups = int(np.max(self.group_ids) + 1)  # int() is important, dont know why
 
-        if isinstance(self.s, float):
+        if isinstance(self.s, float) or isinstance(self.s, int):
             self.s = np.array([self.s] * self.number_of_groups, dtype=float)
         else:
             self.s = np.array(self.s, dtype=float)
