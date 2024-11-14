@@ -34,8 +34,8 @@ Y_train, Y_test = Y_train_org, Y_test_org
 
 tm = MultiClassConvolutionalTsetlinMachine2D(
     clauses_1,
-    T_1,
-    s,
+    [800, 800, 800, 800, 800, 800, 800, 800, 800, 800],
+    [10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
     (28, 28, 1),
     (patch_size, patch_size),
     group_ids=[],
