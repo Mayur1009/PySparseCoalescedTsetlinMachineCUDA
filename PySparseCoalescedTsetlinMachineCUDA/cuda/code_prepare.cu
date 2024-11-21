@@ -29,6 +29,10 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
         }
     }
 
+    for (int i = 0; i < CLASSES; i++) {
+        class_sum[i] = 0;
+    }
+
     state[index] = localState;
 }
 

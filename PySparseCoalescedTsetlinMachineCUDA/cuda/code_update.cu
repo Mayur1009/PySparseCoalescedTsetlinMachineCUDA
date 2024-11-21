@@ -166,6 +166,10 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
+    for (int i = 0; i < CLASSES; i++) {
+        class_sum[i] = 0;
+    }
+
     for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
         int group_id = combined_clause_id / CLAUSES;
         int clause = combined_clause_id % CLAUSES;

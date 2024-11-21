@@ -617,34 +617,29 @@ class CommonTsetlinMachine:
         self.encoded_X_packed_gpu = cuda.mem_alloc(encoded_X_packed.nbytes)
         cuda.memcpy_htod(self.encoded_X_packed_gpu, encoded_X_packed)
 
-    def _fit(self, X, encoded_Y, epochs=100, incremental=False):
+    def reset(self):
+        self.prepare(
+            g.state,
+            self.ta_state_gpu,
+            self.clause_weights_gpu,
+            self.class_sum_gpu,
+            grid=self.grid,
+            block=self.block,
+        )
+        cuda.Context.synchronize()
+
+    def _fit(self, X, encoded_Y, epochs=1, incremental=True):
         # Initialize fit
         if not self.initialized:
             self._init_fit()
             self.init_gpu()
             self._init_encoded_X()
-            self.prepare(
-                g.state,
-                self.ta_state_gpu,
-                self.clause_weights_gpu,
-                self.class_sum_gpu,
-                grid=self.grid,
-                block=self.block,
-            )
+            self.reset()
             self.initialized = True
-            cuda.Context.synchronize()
 
         # If not incremental, clear ta-state and clause_weghts
         elif not incremental:
-            self.prepare(
-                g.state,
-                self.ta_state_gpu,
-                self.clause_weights_gpu,
-                self.class_sum_gpu,
-                grid=self.grid,
-                block=self.block,
-            )
-            cuda.Context.synchronize()
+            self.reset()
 
         # Copy data to Gpu
         if not np.array_equal(self.X_train, np.concatenate((X.indptr, X.indices))):

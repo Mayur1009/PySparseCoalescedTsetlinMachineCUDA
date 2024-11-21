@@ -6,7 +6,7 @@ from keras.api.datasets import mnist
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
-from PySparseCoalescedTsetlinMachineCUDA.tm import MultiOutputConvolutionalTsetlinMachine2D
+from PySparseCoalescedTsetlinMachineCUDA.tm import MultiClassConvolutionalTsetlinMachine2D
 
 clauses_1 = int(2500)
 s = 10.0
@@ -23,15 +23,17 @@ X_test = np.where(X_test.reshape((X_test.shape[0], 28 * 28)) > 75, 1, 0)
 
 classes = 10
 
-Y_train = np.zeros((Y_train_org.shape[0], classes), dtype=np.uint32)
-for i in range(Y_train_org.shape[0]):
-    Y_train[i, Y_train_org[i]] = 1
+Y_train = Y_train_org
+Y_test = Y_test_org
+# Y_train = np.zeros((Y_train_org.shape[0], classes), dtype=np.uint32)
+# for i in range(Y_train_org.shape[0]):
+#     Y_train[i, Y_train_org[i]] = 1
+#
+# Y_test = np.zeros((Y_test_org.shape[0], classes), dtype=np.uint32)
+# for i in range(Y_test_org.shape[0]):
+#     Y_test[i, Y_test_org[i]] = 1
 
-Y_test = np.zeros((Y_test_org.shape[0], classes), dtype=np.uint32)
-for i in range(Y_test_org.shape[0]):
-    Y_test[i, Y_test_org[i]] = 1
-
-tm = MultiOutputConvolutionalTsetlinMachine2D(clauses_1, T_1, s, (28, 28, 1), (patch_size, patch_size), q=5)
+tm = MultiClassConvolutionalTsetlinMachine2D(clauses_1, T_1, s, (28, 28, 1), (patch_size, patch_size), q=5)
 
 for i in range(epochs):
     start_training = time()
