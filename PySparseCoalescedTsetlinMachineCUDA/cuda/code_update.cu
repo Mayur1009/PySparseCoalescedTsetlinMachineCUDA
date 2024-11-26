@@ -100,11 +100,11 @@ __device__ inline void calculate_clause_output(curandState *localState, unsigned
 }
 
 __device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state, int tp,
-                                     int tn, float s, int clause_output, int clause_patch, int *X, int y, int class_sum,
+                                     int tn, float s, float q, int clause_output, int clause_patch, int *X, int y, int class_sum,
                                      unsigned int weight_factor = 1, unsigned int state_inc_factor = 1) {
     int target = 1 - 2 * (class_sum > y);
 
-    if (target == -1 && curand_uniform(localState) > 1.0 * Q / max(1, CLASSES - 1)) {
+    if (target == -1 && curand_uniform(localState) > 1.0 * q / max(1, CLASSES - 1)) {
         return;
     }
 
@@ -246,7 +246,7 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
                     patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
 
                 update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, TP[class_id],
-                              TN[class_id], S[class_id], clause_output, clause_patch, X, enc_y, local_class_sum,
+                              TN[class_id], S[class_id], Q[class_id], clause_output, clause_patch, X, enc_y, local_class_sum,
                               WEIGHT_UPDATE_FACTOR[class_id], STATE_INC_FACTOR[class_id]);
             }
         }

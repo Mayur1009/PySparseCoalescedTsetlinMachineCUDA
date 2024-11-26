@@ -42,7 +42,7 @@ class CommonTsetlinMachine:
         number_of_clauses: int,
         T: int | list[int] | list[tuple[int, int]],
         s: float | list[float],
-        q: float = 1.0,
+        q: float | list[float] = 1.0,
         max_included_literals: int | None = None,
         boost_true_positive_feedback: int = 1,
         number_of_state_bits: int = 8,
@@ -59,7 +59,7 @@ class CommonTsetlinMachine:
         self.number_of_state_bits = number_of_state_bits
         self.T = T
         self.s = s
-        self.q = float(q)
+        self.q = q
         self.max_included_literals = max_included_literals
         self.boost_true_positive_feedback = boost_true_positive_feedback
         self.append_negated = append_negated
@@ -408,7 +408,6 @@ class CommonTsetlinMachine:
             #define FEATURES %d
             #define STATE_BITS %d
             #define BOOST_TRUE_POSITIVE_FEEDBACK %d
-            #define Q %f
             #define MAX_INCLUDED_LITERALS %d
             #define NEGATIVE_CLAUSES %d
             #define PATCHES %d
@@ -419,7 +418,6 @@ class CommonTsetlinMachine:
             self.number_of_features,
             self.number_of_state_bits,
             self.boost_true_positive_feedback,
-            self.q,
             self.max_included_literals,
             self.negative_clauses,
             self.number_of_patches,
@@ -432,6 +430,7 @@ class CommonTsetlinMachine:
             __device__ float S[CLASSES] = {{{','.join(self.s.astype(str))}}};
             __device__ int TP[CLASSES] = {{{','.join(self.Tp.astype(str))}}};
             __device__ int TN[CLASSES] = {{{','.join(self.Tn.astype(str))}}};
+            __device__ float Q[CLASSES] = {{{','.join(self.q.astype(str))}}};
             __device__ int WEIGHT_UPDATE_FACTOR[CLASSES] = {{{','.join(self.weight_update_factor.astype(str))}}};
             __device__ int STATE_INC_FACTOR[CLASSES] = {{{','.join(self.state_inc_factor.astype(str))}}};
         """
@@ -509,6 +508,12 @@ class CommonTsetlinMachine:
             self.Tp = np.array(Tp, dtype=int)
             self.Tn = np.array(Tn, dtype=int)
 
+
+        if isinstance(self.q, float) or isinstance(self.q, int):
+            self.q = np.array([self.q] * self.number_of_outputs, dtype=float)
+        else:
+            self.q = np.array(self.q, dtype=float)
+
         assert (
             len(self.s) == self.number_of_outputs
         ), "s should be float or list of floats with length equal to number of groups."
@@ -518,6 +523,9 @@ class CommonTsetlinMachine:
         assert (
             len(self.Tn) == self.number_of_outputs
         ), "Something wrong with T,Tn should be float or list of floats with length equal to number of groups."
+        assert (
+            len(self.q) == self.number_of_outputs
+        ), "q should be float or list of floats with length equal to number of groups."
 
     def _init_fit(self):
         self._validate_args()
@@ -820,7 +828,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         s,
         dim,
         patch_dim,
-        q=1.0,
+        q: float | list[float]=1.0,
         max_included_literals=None,
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
@@ -893,7 +901,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         s,
         dim,
         patch_dim,
-        q=1.0,
+        q: float | list[float]=1.0,
         max_included_literals=None,
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
@@ -963,7 +971,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
         number_of_clauses,
         T,
         s,
-        q=1.0,
+        q: float | list[float]=1.0,
         max_included_literals=None,
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
@@ -1030,7 +1038,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
         number_of_clauses,
         T,
         s,
-        q=1.0,
+        q: float | list[float]=1.0,
         max_included_literals=None,
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
@@ -1096,7 +1104,7 @@ class TsetlinMachine(CommonTsetlinMachine):
         number_of_clauses,
         T,
         s,
-        q=1.0,
+        q: float | list[float]=1.0,
         max_included_literals=None,
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
