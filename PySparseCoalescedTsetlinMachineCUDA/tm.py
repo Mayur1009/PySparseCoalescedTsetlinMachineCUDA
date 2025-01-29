@@ -289,7 +289,7 @@ class CommonTsetlinMachine():
 		if self.append_negated:
 			for p_chunk in range((self.number_of_patches-1)//32 + 1):
 				for k in range(self.number_of_features//2, self.number_of_features):
-					encoded_X_packed[p_chunk, k] = np.uint32(~0) 
+					encoded_X_packed[p_chunk, k] = np.int32(~0) 
 
 		for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
 			for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
