@@ -16,8 +16,8 @@ from PySparseCoalescedTsetlinMachineCUDA.tm import MultiClassTsetlinMachine
 batches = 100
 
 s = 1.0
-T = 10000
-clauses = 10000
+T = 200000
+clauses = 20000
 
 print("READ")
 
@@ -69,4 +69,4 @@ for i in range(epochs):
 		result_test = 100*(tm.predict(X_test) == Y_test).mean()
 		stop_testing = time()
 
-		print("#%d Accuracy Test: %.2f%% Training: %.2fs Testing: %.2fs" % (i+1, result_test, stop_training-start_training, stop_testing-start_testing))
+		print("#%d-%d Accuracy Test: %.2f%% Training: %.2fs Testing: %.2fs" % (i+1, batch, result_test, stop_training-start_training, stop_testing-start_testing))
