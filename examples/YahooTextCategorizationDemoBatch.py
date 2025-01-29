@@ -16,8 +16,8 @@ from PySparseCoalescedTsetlinMachineCUDA.tm import MultiClassTsetlinMachine
 batches = 100
 
 s = 1.0
-T = 200000
-clauses = 20000
+T = 400000
+clauses = 40000
 
 print("READ")
 
