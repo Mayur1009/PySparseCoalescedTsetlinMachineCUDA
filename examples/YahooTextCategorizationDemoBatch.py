@@ -19,6 +19,8 @@ s = 1.0
 T = 200000
 clauses = 20000
 
+features = 10000
+
 print("READ")
 
 f = open("/data/yahoo_answers_csv/train.csv", "r")
@@ -54,7 +56,7 @@ Y_test = np.array(testing_y)
 
 print("Selecting features...")
 
-SKB = SelectKBest(chi2, k=FEATURES)
+SKB = SelectKBest(chi2, k=features)
 SKB.fit(X_train, Y_train)
 
 selected_features = SKB.get_support(indices=True)
