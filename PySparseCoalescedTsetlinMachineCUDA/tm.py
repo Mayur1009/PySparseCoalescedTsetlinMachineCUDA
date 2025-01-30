@@ -128,6 +128,19 @@ class CommonTsetlinMachine:
             np.uint8
         )
 
+    def get_ta_states(self):
+        ta_states_gpu = cuda.mem_alloc(self.number_of_groups * self.number_of_clauses * self.number_of_features * 4)
+        self.get_ta_states_gpu(
+            self.ta_state_gpu,
+            ta_states_gpu,
+            grid=self.grid,
+            block=self.block,
+        )
+        cuda.Context.synchronize()
+
+        ta_states = np.empty((self.number_of_groups * self.number_of_clauses * self.number_of_features), dtype=np.uint32)
+        return ta_states.reshape((self.number_of_groups, self.number_of_clauses, self.number_of_features))
+
     def get_weights(self):
         self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
         cuda.memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
@@ -468,6 +481,9 @@ class CommonTsetlinMachine:
         mod_clauses = SourceModule(parameters + kernels.code_header + kernels.code_clauses, no_extern_c=True)
         self.get_literals_gpu = mod_clauses.get_function("get_literals")
         self.get_literals_gpu.prepare("PP")
+
+        self.get_ta_states_gpu = mod_clauses.get_function("get_ta_states")
+        self.get_ta_states_gpu.prepare("PP")
 
     def _validate_args(self):
         if len(self.weight_update_factor) == 0:
