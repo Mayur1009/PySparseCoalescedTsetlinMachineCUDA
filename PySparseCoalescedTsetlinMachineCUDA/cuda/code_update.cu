@@ -153,14 +153,14 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
                     int la_feedback = 0;
 
                     for (int b = 0; b < INT_SIZE; ++b) {
-                        if (ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & (1 << b)) {
+                        if (R > 0 && (ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & (1 << b))) {
                             unsigned int cur_state = 0;
                             get_state(ta_state, 0, la_chunk, b, &cur_state);
                             float max_state = (float)((1 << STATE_BITS) - 1);
                             float s_mod_factor = ((2 * (float)cur_state) - max_state) / (max_state + 2);
                             // if (cur_state >= 210)
                             //     printf("1/s = %f, s_mod_factor: %f, new 1/s: %f, state: %d\n", 1/s, 1.0 - s_mod_factor, (1.0 - s_mod_factor) / s, cur_state);
-                            if (curand_uniform(localState) <= (1.0 - s_mod_factor) / s) la_feedback |= (1 << b);
+                            if (curand_uniform(localState) <= (pow(1.0 - s_mod_factor, R)) / s) la_feedback |= (1 << b);
                         } else {
                             if (curand_uniform(localState) <= 1.0 / s) la_feedback |= (1 << b);
                         }

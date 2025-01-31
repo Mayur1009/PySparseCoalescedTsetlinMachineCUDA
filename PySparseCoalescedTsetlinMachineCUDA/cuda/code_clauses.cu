@@ -20,7 +20,6 @@ __global__ void get_literals(unsigned int *global_ta_state, unsigned int *out) {
     }
 }
 
-// WARN: Not tested
 __global__ void get_ta_states(unsigned int *global_ta_state, unsigned int *out) {
     // :param: global_ta_state
     // Array of TAs for each literal in each clause.

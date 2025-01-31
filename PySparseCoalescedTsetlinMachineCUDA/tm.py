@@ -50,6 +50,7 @@ class CommonTsetlinMachine:
         group_ids: list = [],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         weight_update_factor: list = [],
         state_inc_factor: list = [],
+        r: float = 0.0,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -63,6 +64,7 @@ class CommonTsetlinMachine:
         self.max_included_literals = max_included_literals
         self.boost_true_positive_feedback = boost_true_positive_feedback
         self.append_negated = append_negated
+        self.r = r
         self.grid = grid
         self.block = block
 
@@ -426,6 +428,7 @@ class CommonTsetlinMachine:
             #define NEGATIVE_CLAUSES %d
             #define PATCHES %d
             #define GROUPS %d
+            #define R %f
         """ % (
             self.number_of_outputs,
             self.number_of_clauses,
@@ -436,6 +439,7 @@ class CommonTsetlinMachine:
             self.negative_clauses,
             self.number_of_patches,
             self.number_of_groups,
+            self.r,
         )
 
         parameters = f"""
@@ -661,6 +665,9 @@ class CommonTsetlinMachine:
             self._init_encoded_X()
             self.reset()
             self.initialized = True
+            self.history = {
+                "ta_state": [],
+            }
 
         # If not incremental, clear ta-state and clause_weghts
         elif not incremental:
@@ -742,6 +749,8 @@ class CommonTsetlinMachine:
                     np.int32(0),
                 )
                 cuda.Context.synchronize()
+
+                self.history["ta_state"].append(self.get_ta_states())
 
         self.ta_state = np.array([])
         self.clause_weights = np.array([])
@@ -853,6 +862,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         weight_update_factor: list = [],
         state_inc_factor: list = [],
+        r: float = 0.0,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -868,6 +878,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
             group_ids=group_ids,
             weight_update_factor=weight_update_factor,
             state_inc_factor=state_inc_factor,
+            r=r,
             grid=grid,
             block=block,
         )
@@ -926,6 +937,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
         group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         weight_update_factor: list = [],
         state_inc_factor: list = [],
+        r: float = 0.0,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -941,6 +953,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
             group_ids=group_ids,
             weight_update_factor=weight_update_factor,
             state_inc_factor=state_inc_factor,
+            r=r,
             grid=grid,
             block=block,
         )
@@ -996,6 +1009,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
         group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         weight_update_factor: list = [],
         state_inc_factor: list = [],
+        r: float = 0.0,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -1011,6 +1025,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
             group_ids=group_ids,
             weight_update_factor=weight_update_factor,
             state_inc_factor=state_inc_factor,
+            r=r,
             grid=grid,
             block=block,
         )
@@ -1063,6 +1078,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
         group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         weight_update_factor: list = [],
         state_inc_factor: list = [],
+        r: float = 0.0,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -1078,6 +1094,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
             group_ids=group_ids,
             weight_update_factor=weight_update_factor,
             state_inc_factor=state_inc_factor,
+            r=r,
             grid=grid,
             block=block,
         )
@@ -1129,6 +1146,7 @@ class TsetlinMachine(CommonTsetlinMachine):
         group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         weight_update_factor: list = [],
         state_inc_factor: list = [],
+        r: float = 0.0,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -1144,6 +1162,7 @@ class TsetlinMachine(CommonTsetlinMachine):
             group_ids=group_ids,
             weight_update_factor=weight_update_factor,
             state_inc_factor=state_inc_factor,
+            r=r,
             grid=grid,
             block=block,
         )
@@ -1192,6 +1211,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
         group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
         weight_update_factor: list = [],
         state_inc_factor: list = [],
+        r: float = 0.0,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -1204,6 +1224,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
             group_ids=group_ids,
+            r=r,
             grid=grid,
             block=block,
         )
@@ -1249,6 +1270,7 @@ class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
         boost_true_positive_feedback=1,
         number_of_state_bits=8,
         append_negated=True,
+        r: float = 0.0,
         grid=(16 * 13, 1, 1),
         block=(128, 1, 1),
     ):
@@ -1261,6 +1283,7 @@ class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
             boost_true_positive_feedback=boost_true_positive_feedback,
             number_of_state_bits=number_of_state_bits,
             append_negated=append_negated,
+            r=r,
             grid=grid,
             block=block,
         )
