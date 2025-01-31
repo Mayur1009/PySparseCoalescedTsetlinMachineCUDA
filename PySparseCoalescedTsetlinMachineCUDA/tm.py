@@ -139,6 +139,7 @@ class CommonTsetlinMachine:
         cuda.Context.synchronize()
 
         ta_states = np.empty((self.number_of_groups * self.number_of_clauses * self.number_of_features), dtype=np.uint32)
+        cuda.memcpy_dtoh(ta_states, ta_states_gpu)
         return ta_states.reshape((self.number_of_groups, self.number_of_clauses, self.number_of_features))
 
     def get_weights(self):
