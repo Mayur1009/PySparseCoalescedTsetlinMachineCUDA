@@ -428,7 +428,6 @@ class CommonTsetlinMachine:
             #define NEGATIVE_CLAUSES %d
             #define PATCHES %d
             #define GROUPS %d
-            #define R %f
         """ % (
             self.number_of_outputs,
             self.number_of_clauses,
@@ -439,11 +438,11 @@ class CommonTsetlinMachine:
             self.negative_clauses,
             self.number_of_patches,
             self.number_of_groups,
-            self.r,
         )
 
         parameters = f"""
             {parameters}
+            __device__ float R = {self.r};
             __device__ unsigned int GROUP_ID[CLASSES] = {{{','.join(self.group_ids.astype(str))}}};
             __device__ float S[CLASSES] = {{{','.join(self.s.astype(str))}}};
             __device__ int TP[CLASSES] = {{{','.join(self.Tp.astype(str))}}};
@@ -665,9 +664,6 @@ class CommonTsetlinMachine:
             self._init_encoded_X()
             self.reset()
             self.initialized = True
-            self.history = {
-                "ta_state": [],
-            }
 
         # If not incremental, clear ta-state and clause_weghts
         elif not incremental:
@@ -749,8 +745,6 @@ class CommonTsetlinMachine:
                     np.int32(0),
                 )
                 cuda.Context.synchronize()
-
-                self.history["ta_state"].append(self.get_ta_states())
 
         self.ta_state = np.array([])
         self.clause_weights = np.array([])
