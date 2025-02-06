@@ -53,7 +53,6 @@ for i in range(X_train.shape[0]):
         for r in range(windows.shape[1]):
             patch = windows[q,r].reshape(-1).astype(np.uint32)
             patch_id = patch.dot(1 << np.arange(patch.shape[-1] - 1, -1, -1))
-            X_train_tokenized[i, q, r, :] = 0
             X_train_tokenized[i, q, r,:][encoding[patch_id]] = 1
 
 print("Training data produced")
@@ -68,7 +67,6 @@ for i in range(X_test.shape[0]):
         for r in range(windows.shape[1]):
             patch = windows[q,r].reshape(-1).astype(np.uint32)
             patch_id = patch.dot(1 << np.arange(patch.shape[-1] - 1, -1, -1))
-            X_test_tokenized[i, q, r, :] = 0
             X_test_tokenized[i, q, r,:][encoding[patch_id]] = 1
 
 print("Testing data produced")
