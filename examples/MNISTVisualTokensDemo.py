@@ -42,7 +42,7 @@ encoding = np.zeros(symbols, dtype=np.uint32)
 for i in range(symbols):
     encoding[i] = i
 
-X_train_tokenized = np.zeros((X_train.shape[0], 26, 26, hypervector_size), dtype=np.uint32)
+X_train_tokenized = np.zeros((X_train.shape[0], 26, 26, symbols), dtype=np.uint32)
 for i in range(X_train.shape[0]):
     if i % 1000 == 0:
         print(i, X_train.shape[0])
@@ -57,7 +57,7 @@ for i in range(X_train.shape[0]):
 
 print("Training data produced")
 
-X_test_tokenized = np.zeros((X_test.shape[0], 26, 26, hypervector_size), dtype=np.uint32)
+X_test_tokenized = np.zeros((X_test.shape[0], 26, 26, symbols), dtype=np.uint32)
 for i in range(X_test.shape[0]):
     if i % 1000 == 0:
         print(i, X_test.shape[0])
@@ -77,7 +77,7 @@ print("Testing data produced")
 X_train = csr_matrix(X_train_tokenized.reshape(X_train.shape[0], -1))
 X_test = csr_matrix(X_test_tokenized.reshape(X_test.shape[0], -1))
 
-tm = MultiClassConvolutionalTsetlinMachine2D(args.number_of_clauses, args.T, args.s, (dim, dim, hypervector_size), (1, 1), max_included_literals=args.max_included_literals)
+tm = MultiClassConvolutionalTsetlinMachine2D(args.number_of_clauses, args.T, args.s, (dim, dim, symbols), (1, 1), max_included_literals=args.max_included_literals)
 
 for epoch in range(args.epochs):
     start_training = time()
