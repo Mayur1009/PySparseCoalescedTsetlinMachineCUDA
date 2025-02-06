@@ -91,7 +91,7 @@ tm = MultiClassConvolutionalTsetlinMachine2D(args.number_of_clauses, args.T, arg
 
 for epoch in range(args.epochs):
     start_training = time()
-    tm.fit(X_train, Y_train)
+    tm.fit(X_train, Y_train, incremental=True, epochs=1)
     stop_training = time()
 
     start_testing = time()
