@@ -22,6 +22,7 @@ def default_args(**kwargs):
     parser.add_argument("--number-of-clauses", default=1000, type=int)
     parser.add_argument("--T", default=1000, type=int)
     parser.add_argument("--s", default=1.0, type=float)
+    parser.add_argument("--patch-size", default=1, type=int)
     parser.add_argument("--max-included-literals", default=32, type=int)
 
     args = parser.parse_args()
@@ -77,7 +78,7 @@ print("Testing data produced")
 X_train = csr_matrix(X_train_tokenized.reshape(X_train.shape[0], -1))
 X_test = csr_matrix(X_test_tokenized.reshape(X_test.shape[0], -1))
 
-tm = MultiClassConvolutionalTsetlinMachine2D(args.number_of_clauses, args.T, args.s, (dim, dim, symbols), (1, 1), max_included_literals=args.max_included_literals)
+tm = MultiClassConvolutionalTsetlinMachine2D(args.number_of_clauses, args.T, args.s, (dim, dim, symbols), (args.patch_size, args.patch_size), max_included_literals=args.max_included_literals)
 
 for epoch in range(args.epochs):
     start_training = time()
