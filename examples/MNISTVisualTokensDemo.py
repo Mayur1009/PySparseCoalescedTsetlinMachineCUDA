@@ -32,7 +32,7 @@ def default_args(**kwargs):
 
 args = default_args()
 
-f = open("mnist_%.1f_%d_%d_%d_%d.txt" % (args.s, args.number_of_clauses, args.T, args.hypervector_bits, args.hypervector_size), "w+")
+f = open("mnist_%.1f_%d_%d.txt" % (args.s, args.number_of_clauses, args.T), "w+")
 
 patch_size = 3
 dim = 28 - patch_size + 1
