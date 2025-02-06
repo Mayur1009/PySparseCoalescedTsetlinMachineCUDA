@@ -42,7 +42,7 @@ encoding = np.zeros(symbols, dtype=np.uint32)
 for i in range(symbols):
     encoding[i] = i
 
-X_train_tokenized = np.zeros((X_train.shape[0], 26, 26, symbols), dtype=np.uint32)
+X_train_tokenized = np.zeros((X_train.shape[0], dim, dim, symbols), dtype=np.uint32)
 for i in range(X_train.shape[0]):
     if i % 1000 == 0:
         print(i, X_train.shape[0])
@@ -57,7 +57,7 @@ for i in range(X_train.shape[0]):
 
 print("Training data produced")
 
-X_test_tokenized = np.zeros((X_test.shape[0], 26, 26, symbols), dtype=np.uint32)
+X_test_tokenized = np.zeros((X_test.shape[0], dim, dim, symbols), dtype=np.uint32)
 for i in range(X_test.shape[0]):
     if i % 1000 == 0:
         print(i, X_test.shape[0])
