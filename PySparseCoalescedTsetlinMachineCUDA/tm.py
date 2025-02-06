@@ -265,7 +265,7 @@ class CommonTsetlinMachine():
 						if self.append_negated:
 							chunk = (patch_pos + self.number_of_features//2) // 32
 							pos = (patch_pos + self.number_of_features//2) % 32
-							encoded_X[p, chunk] &= np.int32(~(1 << pos))
+							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
 
 				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
 					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
@@ -277,7 +277,7 @@ class CommonTsetlinMachine():
 						if self.append_negated:
 							chunk = (patch_pos + self.number_of_features//2) // 32
 							pos = (patch_pos + self.number_of_features//2) % 32
-							encoded_X[p, chunk] &= np.int32(~(1 << pos))
+							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
 
 		encoded_X = encoded_X.reshape(-1)
 		self.encoded_X_gpu = cuda.mem_alloc(encoded_X.nbytes)
@@ -289,7 +289,7 @@ class CommonTsetlinMachine():
 		if self.append_negated:
 			for p_chunk in range((self.number_of_patches-1)//32 + 1):
 				for k in range(self.number_of_features//2, self.number_of_features):
-					encoded_X_packed[p_chunk, k] = np.int32(~0) 
+					encoded_X_packed[p_chunk, k] = ~np.uint32(0) 
 
 		for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
 			for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
@@ -303,7 +303,7 @@ class CommonTsetlinMachine():
 						encoded_X_packed[p_chunk, patch_pos] |= (1 << p_pos)
 
 						if self.append_negated:
-							encoded_X_packed[p_chunk, patch_pos + self.number_of_features//2] &= np.int32(~(1 << p_pos))
+							encoded_X_packed[p_chunk, patch_pos + self.number_of_features//2] &= ~np.uint32(1 << p_pos)
 
 				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
 					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
@@ -311,7 +311,7 @@ class CommonTsetlinMachine():
 						encoded_X_packed[p_chunk, patch_pos] |= (1 << p_pos)
 
 						if self.append_negated:
-							encoded_X_packed[p_chunk, patch_pos + self.number_of_features//2] &= np.int32(~(1 << p_pos))
+							encoded_X_packed[p_chunk, patch_pos + self.number_of_features//2] &= ~np.uint32(1 << p_pos)
 
 		encoded_X_packed = encoded_X_packed.reshape(-1)
 		self.encoded_X_packed_gpu = cuda.mem_alloc(encoded_X_packed.nbytes)
