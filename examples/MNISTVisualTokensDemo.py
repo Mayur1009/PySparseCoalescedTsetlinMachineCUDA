@@ -35,16 +35,9 @@ args = default_args()
 f = open("mnist_%.1f_%d_%d.txt" % (args.s, args.number_of_clauses, args.T), "w+")
 
 patch_size = 3
+symbols = 2**(patch_size*patch_size)
 dim = 28 - patch_size + 1
 
-number_of_nodes = dim * dim
-
-# Produces hypervector codes
-
-symbols = patch_size*patch_size
-hypervector_size = symbols
-
-indexes = np.arange(hypervector_size, dtype=np.uint32)
 encoding = np.zeros(symbols, dtype=np.uint32)
 for i in range(symbols):
     encoding[i] = i
@@ -58,9 +51,9 @@ for i in range(X_train.shape[0]):
     for q in range(windows.shape[0]):
         for r in range(windows.shape[1]):
             patch = windows[q,r].reshape(-1).astype(np.uint32)
+            patch_id = patch.dot(1 << np.arange(patch.shape[-1] - 1, -1, -1))
             X_train_tokenized[i, q, r, :] = 0
-            for k in patch.nonzero()[0]:
-                X_train_tokenized[i, q, r,:][encoding[k]] = 1
+            X_train_tokenized[i, q, r,:][encoding[patch_id]] = 1
 
 print("Training data produced")
 
@@ -73,9 +66,9 @@ for i in range(X_test.shape[0]):
     for q in range(windows.shape[0]):
         for r in range(windows.shape[1]):
             patch = windows[q,r].reshape(-1).astype(np.uint32)
+            patch_id = patch.dot(1 << np.arange(patch.shape[-1] - 1, -1, -1))
             X_test_tokenized[i, q, r, :] = 0
-            for k in patch.nonzero()[0]:
-                X_test_tokenized[i, q, r,:][encoding[k]] = 1
+            X_test_tokenized[i, q, r,:][encoding[patch_id]] = 1
 
 print("Testing data produced")
 
