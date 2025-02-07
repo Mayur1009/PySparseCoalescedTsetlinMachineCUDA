@@ -27,3 +27,6 @@ reportUnusedImport = false
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.format]
+indent-style = "tab"
