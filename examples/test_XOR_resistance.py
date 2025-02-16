@@ -24,9 +24,11 @@ if __name__ == "__main__":
     for noise in [0.01]:
         X_train, Y_train = create_data(4000, noise)
         X_test, Y_test = create_data(2000, noise)
-        tm = MultiClassTsetlinMachine(number_of_clauses=4, T=100, s=1.0, sr=100.0)
+        tm = MultiClassTsetlinMachine(number_of_clauses=4, T=100, s=1.0, sr=10.0)
         for epoch in range(10):
             tm.fit(X_train, Y_train, epochs=1, incremental=True)
+            states = tm.get_ta_states()
+            print(f'{states=}')
             pred = tm.predict(X_test)
             acc = np.mean(pred == Y_test)
             print(f"{acc=}")
