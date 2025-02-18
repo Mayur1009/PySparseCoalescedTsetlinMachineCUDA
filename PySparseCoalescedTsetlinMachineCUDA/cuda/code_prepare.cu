@@ -12,7 +12,8 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
 
         unsigned int *ta_state =
             &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
-        for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
+
+        for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
             for (int b = 0; b < STATE_BITS - 1; ++b) {
                 ta_state[la_chunk * STATE_BITS + b] = ~0;
             }

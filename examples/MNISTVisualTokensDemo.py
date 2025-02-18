@@ -22,8 +22,7 @@ def default_args(**kwargs):
     parser.add_argument("--number-of-clauses", default=1000, type=int)
     parser.add_argument("--T", default=1000, type=int)
     parser.add_argument("--s", default=1.0, type=float)
-    parser.add_argument("--hypervector-size", default=128, type=int)
-    parser.add_argument("--hypervector-bits", default=2, type=int)
+    parser.add_argument("--patch-size", default=1, type=int)
     parser.add_argument("--max-included-literals", default=32, type=int)
 
     args = parser.parse_args()
@@ -34,25 +33,17 @@ def default_args(**kwargs):
 
 args = default_args()
 
-f = open("mnist_%.1f_%d_%d_%d_%d.txt" % (args.s, args.number_of_clauses, args.T, args.hypervector_bits, args.hypervector_size), "w+")
+f = open("mnist_%.1f_%d_%d.txt" % (args.s, args.number_of_clauses, args.T), "w+")
 
 patch_size = 3
+symbols = 2**(patch_size*patch_size)
 dim = 28 - patch_size + 1
 
-number_of_nodes = dim * dim
-
-# Produces hypervector codes
-
-symbols = patch_size*patch_size
-hypervector_size = args.hypervector_size
-hypervector_bits = args.hypervector_bits
-
-indexes = np.arange(hypervector_size, dtype=np.uint32)
-encoding = np.zeros((symbols, hypervector_bits), dtype=np.uint32)
+encoding = np.zeros(symbols, dtype=np.uint32)
 for i in range(symbols):
-    encoding[i] = np.random.choice(indexes, size=(hypervector_bits))
+    encoding[i] = i
 
-X_train_tokenized = np.zeros((X_train.shape[0], 26, 26, hypervector_size), dtype=np.uint32)
+X_train_tokenized = np.zeros((X_train.shape[0], dim, dim, symbols), dtype=np.uint32)
 for i in range(X_train.shape[0]):
     if i % 1000 == 0:
         print(i, X_train.shape[0])
@@ -61,13 +52,12 @@ for i in range(X_train.shape[0]):
     for q in range(windows.shape[0]):
         for r in range(windows.shape[1]):
             patch = windows[q,r].reshape(-1).astype(np.uint32)
-            X_train_tokenized[i, q, r, :] = 0
-            for k in patch.nonzero()[0]:
-                X_train_tokenized[i, q, r,:][encoding[k]] = 1
+            patch_id = patch.dot(1 << np.arange(patch.shape[-1] - 1, -1, -1))
+            X_train_tokenized[i, q, r,:][encoding[patch_id]] = 1
 
 print("Training data produced")
 
-X_test_tokenized = np.zeros((X_test.shape[0], 26, 26, hypervector_size), dtype=np.uint32)
+X_test_tokenized = np.zeros((X_test.shape[0], dim, dim, symbols), dtype=np.uint32)
 for i in range(X_test.shape[0]):
     if i % 1000 == 0:
         print(i, X_test.shape[0])
@@ -76,9 +66,8 @@ for i in range(X_test.shape[0]):
     for q in range(windows.shape[0]):
         for r in range(windows.shape[1]):
             patch = windows[q,r].reshape(-1).astype(np.uint32)
-            X_test_tokenized[i, q, r, :] = 0
-            for k in patch.nonzero()[0]:
-                X_test_tokenized[i, q, r,:][encoding[k]] = 1
+            patch_id = patch.dot(1 << np.arange(patch.shape[-1] - 1, -1, -1))
+            X_test_tokenized[i, q, r,:][encoding[patch_id]] = 1
 
 print("Testing data produced")
 
@@ -87,7 +76,7 @@ print("Testing data produced")
 X_train = csr_matrix(X_train_tokenized.reshape(X_train.shape[0], -1))
 X_test = csr_matrix(X_test_tokenized.reshape(X_test.shape[0], -1))
 
-tm = MultiClassConvolutionalTsetlinMachine2D(args.number_of_clauses, args.T, args.s, (dim, dim, args.hypervector_size), (1, 1), max_included_literals=args.max_included_literals)
+tm = MultiClassConvolutionalTsetlinMachine2D(args.number_of_clauses, args.T, args.s, (dim, dim, symbols), (args.patch_size, args.patch_size), max_included_literals=args.max_included_literals)
 
 for epoch in range(args.epochs):
     start_training = time()
