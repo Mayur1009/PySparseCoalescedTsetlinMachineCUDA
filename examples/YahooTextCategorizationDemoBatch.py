@@ -16,8 +16,10 @@ from PySparseCoalescedTsetlinMachineCUDA.tm import MultiClassTsetlinMachine
 batches = 100
 
 s = 1.0
-T = 10000
-clauses = 10000
+T = 200000
+clauses = 20000
+
+features = 10000
 
 print("READ")
 
@@ -41,7 +43,7 @@ f.close()
 
 print(len(training_documents))
 
-vectorizer_X = CountVectorizer(binary=True, max_features=10000)
+vectorizer_X = CountVectorizer(binary=True, ngram_range=(1, 2))
 
 print("VECTORIZE")
 X_train = vectorizer_X.fit_transform(training_documents)
@@ -51,6 +53,15 @@ Y_train = np.array(training_y)
 
 X_test = vectorizer_X.transform(testing_documents)
 Y_test = np.array(testing_y)
+
+print("Selecting features...")
+
+SKB = SelectKBest(chi2, k=features)
+SKB.fit(X_train, Y_train)
+
+selected_features = SKB.get_support(indices=True)
+X_train = SKB.transform(X_train)
+X_test = SKB.transform(X_test)
 
 print("DONE")
 
@@ -69,4 +80,4 @@ for i in range(epochs):
 		result_test = 100*(tm.predict(X_test) == Y_test).mean()
 		stop_testing = time()
 
-		print("#%d Accuracy Test: %.2f%% Training: %.2fs Testing: %.2fs" % (i+1, result_test, stop_training-start_training, stop_testing-start_testing))
+		print("#%d-%d Accuracy Test: %.2f%% Training: %.2fs Testing: %.2fs" % (i+1, batch, result_test, stop_training-start_training, stop_testing-start_testing))
