@@ -21,6 +21,7 @@
 # This code implements the Convolutional Tsetlin Machine from paper arXiv:1905.09688
 # https://arxiv.org/abs/1905.09688
 
+import pickle
 import sys
 
 import numpy as np
@@ -232,6 +233,93 @@ class CommonTsetlinMachine:
 		self.ta_state = np.array([])
 		self.clause_weights = np.array([])
 		self.patch_weights = np.array([])
+
+	def save(self, fname=""):
+		# Copy data from GPU to CPU
+		if np.array_equal(self.ta_state, np.array([])):
+			self.ta_state = np.empty(
+				self.number_of_groups * self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits,
+				dtype=np.uint32,
+			)
+			cuda.memcpy_dtoh(self.ta_state, self.ta_state_gpu)
+
+		if np.array_equal(self.clause_weights, np.array([])):
+			self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
+			cuda.memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
+
+		if np.array_equal(self.clause_weights, np.array([])):
+			self.patch_weights = np.empty(
+				self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
+			)
+			cuda.memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
+
+		state_dict = {
+			# State arrays
+			"ta_state": self.ta_state,
+			"clause_weights": self.clause_weights,
+			"patch_weights": self.patch_weights,
+			"number_of_outputs": self.number_of_outputs,
+			"number_of_features": self.number_of_features,
+			"min_y": self.min_y,
+			"max_y": self.max_y,
+			"negative_clauses": self.negative_clauses,  # Set in children classes, should be set in this class.
+			# Parameters
+			"number_of_clauses": self.number_of_clauses,
+			"T": self.T,
+			"s": self.s,
+			"q": self.q,
+			"patch_dim": self.patch_dim,
+			"r": self.r,
+			"sr": self.sr,
+			"dim": self.dim,
+			"max_included_literals": self.max_included_literals,
+			"boost_true_positive_feedback": self.boost_true_positive_feedback,
+			"number_of_state_bits": self.number_of_state_bits,
+			"append_negated": self.append_negated,
+			"group_ids": self.group_ids,  # list of length number_of_classes, giving a group_id to each class, starting from 0.
+			"weight_update_factor": self.weight_update_factor,
+			"state_inc_factor": self.state_inc_factor,
+		}
+
+		# Save to file
+		if len(fname) > 0:
+			print(f"Saving model to {fname}.")
+			with open(fname, "wb") as f:
+				pickle.dump(state_dict, f)
+
+		return state_dict
+
+	def load(self, state_dict={}, fname=""):
+		if len(fname) == 0 and len(state_dict) == 0:
+			print("Error: No file or state_dict provided. Pass either a file name or a state_dict.")
+			return
+
+		# Load from file
+		if len(fname) > 0:
+			print(f"Loading model from {fname}.")
+			with open(fname, "rb") as f:
+				state_dict = pickle.load(f)
+
+		# Load arrays state_dict
+		self.ta_state = state_dict["ta_state"]
+		self.clause_weights = state_dict["clause_weights"]
+		self.patch_weights = state_dict["patch_weights"]
+		self.number_of_outputs = state_dict["number_of_outputs"]
+		self.dim = state_dict["dim"]
+		self.patch_dim = state_dict["patch_dim"]
+		self.min_y = state_dict["min_y"]
+		self.max_y = state_dict["max_y"]
+		self.negative_clauses = state_dict["negative_clauses"]
+
+		self._init_fit()
+		self.init_gpu()
+		self._init_encoded_X()
+
+		cuda.memcpy_htod(self.ta_state_gpu, self.ta_state)
+		cuda.memcpy_htod(self.clause_weights_gpu, self.clause_weights)
+		cuda.memcpy_htod(self.patch_weights_gpu, self.patch_weights)
+
+		self.initialized = True
 
 	# Transform input data for processing at next layer
 	def transform(self, X) -> csr_matrix:
@@ -607,8 +695,8 @@ class CommonTsetlinMachine:
 						encoded_X[p, chunk] |= 1 << pos
 
 						if self.append_negated:
-							chunk = (patch_pos + self.number_of_features//2) // 32
-							pos = (patch_pos + self.number_of_features//2) % 32
+							chunk = (patch_pos + self.number_of_features // 2) // 32
+							pos = (patch_pos + self.number_of_features // 2) % 32
 							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
 
 				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
@@ -619,8 +707,8 @@ class CommonTsetlinMachine:
 						encoded_X[p, chunk] |= 1 << pos
 
 						if self.append_negated:
-							chunk = (patch_pos + self.number_of_features//2) // 32
-							pos = (patch_pos + self.number_of_features//2) % 32
+							chunk = (patch_pos + self.number_of_features // 2) // 32
+							pos = (patch_pos + self.number_of_features // 2) % 32
 							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
 
 		encoded_X = encoded_X.reshape(-1)
@@ -630,9 +718,9 @@ class CommonTsetlinMachine:
 		# Encoded X packed
 		encoded_X_packed = np.zeros(((self.number_of_patches - 1) // 32 + 1, self.number_of_features), dtype=np.uint32)
 		if self.append_negated:
-			for p_chunk in range((self.number_of_patches-1)//32 + 1):
-				for k in range(self.number_of_features//2, self.number_of_features):
-					encoded_X_packed[p_chunk, k] = ~np.uint32(0) 
+			for p_chunk in range((self.number_of_patches - 1) // 32 + 1):
+				for k in range(self.number_of_features // 2, self.number_of_features):
+					encoded_X_packed[p_chunk, k] = ~np.uint32(0)
 
 		for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
 			for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
@@ -646,7 +734,9 @@ class CommonTsetlinMachine:
 						encoded_X_packed[p_chunk, patch_pos] |= 1 << p_pos
 
 						if self.append_negated:
-							encoded_X_packed[p_chunk, patch_pos + self.number_of_features//2] &= ~np.uint32(1 << p_pos)
+							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(
+								1 << p_pos
+							)
 
 				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
 					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
@@ -654,7 +744,9 @@ class CommonTsetlinMachine:
 						encoded_X_packed[p_chunk, patch_pos] |= 1 << p_pos
 
 						if self.append_negated:
-							encoded_X_packed[p_chunk, patch_pos + self.number_of_features//2] &= ~np.uint32(1 << p_pos)
+							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(
+								1 << p_pos
+							)
 
 		encoded_X_packed = encoded_X_packed.reshape(-1)
 		self.encoded_X_packed_gpu = cuda.mem_alloc(encoded_X_packed.nbytes)
