@@ -41,7 +41,7 @@ class CommonTsetlinMachine:
 	def __init__(
 		self,
 		number_of_clauses: int,
-		T: int | list[int] | list[tuple[int, int]],
+		T: int | list[int],
 		s: float | list[float],
 		q: float | list[float] = 1.0,
 		max_included_literals: int | None = None,
@@ -49,8 +49,6 @@ class CommonTsetlinMachine:
 		number_of_state_bits: int = 8,
 		append_negated: bool = True,
 		group_ids: list = [],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
-		weight_update_factor: list = [],
-		state_inc_factor: list = [],
 		r: float = 1.0,
 		sr: float | list[float] | None = None,
 		grid=(16 * 13, 1, 1),
@@ -78,8 +76,6 @@ class CommonTsetlinMachine:
 		self.clause_weights = np.array([])
 		self.patch_weights = np.array([])
 		self.group_ids = np.array(group_ids, dtype=np.uint32)
-		self.weight_update_factor = np.array(weight_update_factor, dtype=np.uint32)
-		self.state_inc_factor = np.array(state_inc_factor, dtype=np.uint32)
 
 		self.negative_clauses = 1  # Default is 1, set to 0 in RegressionTsetlinMachine
 		self.initialized = False
@@ -277,8 +273,6 @@ class CommonTsetlinMachine:
 			"number_of_state_bits": self.number_of_state_bits,
 			"append_negated": self.append_negated,
 			"group_ids": self.group_ids,  # list of length number_of_classes, giving a group_id to each class, starting from 0.
-			"weight_update_factor": self.weight_update_factor,
-			"state_inc_factor": self.state_inc_factor,
 		}
 
 		# Save to file
@@ -539,11 +533,8 @@ class CommonTsetlinMachine:
             __device__ unsigned int GROUP_ID[CLASSES] = {{{",".join(self.group_ids.astype(str))}}};
             __device__ float S[CLASSES] = {{{",".join(self.s.astype(str))}}};
             __device__ float SR[CLASSES] = {{{",".join(self.sr.astype(str))}}};
-            __device__ int TP[CLASSES] = {{{",".join(self.Tp.astype(str))}}};
-            __device__ int TN[CLASSES] = {{{",".join(self.Tn.astype(str))}}};
+            __device__ int T[CLASSES] = {{{",".join(self.T.astype(str))}}};
             __device__ float Q[CLASSES] = {{{",".join(self.q.astype(str))}}};
-            __device__ int WEIGHT_UPDATE_FACTOR[CLASSES] = {{{",".join(self.weight_update_factor.astype(str))}}};
-            __device__ int STATE_INC_FACTOR[CLASSES] = {{{",".join(self.state_inc_factor.astype(str))}}};
         """
 
 		# Prepare
@@ -584,22 +575,10 @@ class CommonTsetlinMachine:
 		self.get_ta_states_gpu.prepare("PP")
 
 	def _validate_args(self):
-		if len(self.weight_update_factor) == 0:
-			self.weight_update_factor = np.array([1] * self.number_of_outputs, dtype=np.uint32)
-		assert len(self.weight_update_factor) == self.number_of_outputs, (
-			"len(weight_update_factor) should be equal to number of classes"
-		)
-
-		if len(self.state_inc_factor) == 0:
-			self.state_inc_factor = np.array([1] * self.number_of_outputs, dtype=np.uint32)
-		assert len(self.state_inc_factor) == self.number_of_outputs, (
-			"len(state_inc_factor) should be equal to number of classes"
-		)
-
 		if len(self.group_ids) == 0:
 			self.group_ids = np.array([0] * self.number_of_outputs, dtype=np.uint32)
 		assert len(self.group_ids) == self.number_of_outputs, "len(group_ids) should be equal to number of classes"
-		self.number_of_groups = int(np.max(self.group_ids) + 1)  # int() is important, dont know why
+		self.number_of_groups = int(np.max(self.group_ids) + 1)  # int() is important
 
 		if isinstance(self.s, float) or isinstance(self.s, int):
 			self.s = np.array([self.s] * self.number_of_outputs, dtype=float)
@@ -614,20 +593,9 @@ class CommonTsetlinMachine:
 			self.sr = np.array(self.sr, dtype=float)
 
 		if isinstance(self.T, int):
-			self.Tp = np.array([self.T] * self.number_of_outputs, dtype=int)
-			self.Tn = np.array([-self.T] * self.number_of_outputs, dtype=int)
+			self.T = np.array([self.T] * self.number_of_outputs, dtype=int)
 		elif isinstance(self.T, list):
-			Tp, Tn = [], []
-			for v in list(self.T):
-				if isinstance(v, tuple):
-					Tn.append(v[0])
-					Tp.append(v[1])
-				else:
-					Tp.append(v)
-					Tn.append(-v)
-
-			self.Tp = np.array(Tp, dtype=int)
-			self.Tn = np.array(Tn, dtype=int)
+			self.T = np.array(self.T, dtype=int)
 
 		if isinstance(self.q, float) or isinstance(self.q, int):
 			self.q = np.array([self.q] * self.number_of_outputs, dtype=float)
@@ -635,19 +603,16 @@ class CommonTsetlinMachine:
 			self.q = np.array(self.q, dtype=float)
 
 		assert len(self.s) == self.number_of_outputs, (
-			"s should be float or list of floats with length equal to number of groups."
+			"s should be float or list of floats with length equal to number of classes."
 		)
 		assert len(self.sr) == self.number_of_outputs, (
-			"sr should be None(default), float or list of floats with length equal to number of groups."
+			"sr should be None(default), float or list of floats with length equal to number of classes."
 		)
-		assert len(self.Tp) == self.number_of_outputs, (
-			"Something wrong with T, Tp should be float or list of floats with length equal to number of groups."
-		)
-		assert len(self.Tn) == self.number_of_outputs, (
-			"Something wrong with T,Tn should be float or list of floats with length equal to number of groups."
+		assert len(self.T) == self.number_of_outputs, (
+			"Something wrong with T, T should be int or list of ints with length equal to number of classes."
 		)
 		assert len(self.q) == self.number_of_outputs, (
-			"q should be float or list of floats with length equal to number of groups."
+			"q should be float or list of floats with length equal to number of classes."
 		)
 
 	def _init_fit(self):
@@ -961,8 +926,6 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		number_of_state_bits=8,
 		append_negated=True,
 		group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
-		weight_update_factor: list = [],
-		state_inc_factor: list = [],
 		r: float = 1.0,
 		sr: float | list[float] | None = None,
 		grid=(16 * 13, 1, 1),
@@ -978,8 +941,6 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 			number_of_state_bits=number_of_state_bits,
 			append_negated=append_negated,
 			group_ids=group_ids,
-			weight_update_factor=weight_update_factor,
-			state_inc_factor=state_inc_factor,
 			r=r,
 			sr=sr,
 			grid=grid,
@@ -1038,8 +999,6 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		number_of_state_bits=8,
 		append_negated=True,
 		group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
-		weight_update_factor: list = [],
-		state_inc_factor: list = [],
 		r: float = 1.0,
 		sr: float | list[float] | None = None,
 		grid=(16 * 13, 1, 1),
@@ -1055,8 +1014,6 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 			number_of_state_bits=number_of_state_bits,
 			append_negated=append_negated,
 			group_ids=group_ids,
-			weight_update_factor=weight_update_factor,
-			state_inc_factor=state_inc_factor,
 			r=r,
 			sr=sr,
 			grid=grid,
@@ -1112,8 +1069,6 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		number_of_state_bits=8,
 		append_negated=True,
 		group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
-		weight_update_factor: list = [],
-		state_inc_factor: list = [],
 		r: float = 1.0,
 		sr: float | list[float] | None = None,
 		grid=(16 * 13, 1, 1),
@@ -1129,8 +1084,6 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 			number_of_state_bits=number_of_state_bits,
 			append_negated=append_negated,
 			group_ids=group_ids,
-			weight_update_factor=weight_update_factor,
-			state_inc_factor=state_inc_factor,
 			r=r,
 			sr=sr,
 			grid=grid,
@@ -1183,8 +1136,6 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		number_of_state_bits=8,
 		append_negated=True,
 		group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
-		weight_update_factor: list = [],
-		state_inc_factor: list = [],
 		r: float = 1.0,
 		sr: float | list[float] | None = None,
 		grid=(16 * 13, 1, 1),
@@ -1200,8 +1151,6 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 			number_of_state_bits=number_of_state_bits,
 			append_negated=append_negated,
 			group_ids=group_ids,
-			weight_update_factor=weight_update_factor,
-			state_inc_factor=state_inc_factor,
 			r=r,
 			sr=sr,
 			grid=grid,
@@ -1253,8 +1202,6 @@ class TsetlinMachine(CommonTsetlinMachine):
 		number_of_state_bits=8,
 		append_negated=True,
 		group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
-		weight_update_factor: list = [],
-		state_inc_factor: list = [],
 		r: float = 1.0,
 		sr: float | list[float] | None = None,
 		grid=(16 * 13, 1, 1),
@@ -1270,8 +1217,6 @@ class TsetlinMachine(CommonTsetlinMachine):
 			number_of_state_bits=number_of_state_bits,
 			append_negated=append_negated,
 			group_ids=group_ids,
-			weight_update_factor=weight_update_factor,
-			state_inc_factor=state_inc_factor,
 			r=r,
 			sr=sr,
 			grid=grid,
@@ -1320,8 +1265,6 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 		number_of_state_bits=8,
 		append_negated=True,
 		group_ids=[],  # list of length number_of_classes, giving a group_id to each class, starting from 0.
-		weight_update_factor: list = [],
-		state_inc_factor: list = [],
 		r: float = 1.0,
 		sr: float | list[float] | None = None,
 		grid=(16 * 13, 1, 1),

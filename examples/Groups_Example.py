@@ -39,8 +39,6 @@ tm = MultiClassConvolutionalTsetlinMachine2D(
     (28, 28, 1),
     (patch_size, patch_size),
     group_ids=[],
-    weight_update_factor=[5, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    state_inc_factor=[5, 1, 1, 1, 1, 1, 1, 1, 1, 1],
 )
 
 for i in range(epochs):
