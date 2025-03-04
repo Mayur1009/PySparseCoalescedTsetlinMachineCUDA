@@ -37,6 +37,49 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
     state[index] = localState;
 }
 
+__global__ void reset_clauses(curandState *state, unsigned int *global_ta_state) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    curandState localState = state[index];
+
+    for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
+        int group_id = combined_clause_id / CLAUSES;
+        int clause = combined_clause_id % CLAUSES;
+
+        unsigned int *ta_state =
+            &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
+
+        for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
+            for (int b = 0; b < STATE_BITS - 1; ++b) {
+                ta_state[la_chunk * STATE_BITS + b] = ~0;
+            }
+            ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] = 0;
+        }
+    }
+
+    state[index] = localState;
+}
+
+__global__ void reset_weights(curandState *state, int *clause_weights) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    curandState localState = state[index];
+
+    for (int class_clause = index; class_clause < CLASSES * CLAUSES; class_clause += stride) {
+        int class_id = class_clause / CLAUSES;
+        int clause = class_clause % CLAUSES;
+
+        if (NEGATIVE_CLAUSES)
+            clause_weights[class_id * CLAUSES + clause] = 1 - 2 * (curand(&localState) % 2);
+        else
+            clause_weights[class_id * CLAUSES + clause] = 1;
+    }
+
+    state[index] = localState;
+}
+
 __global__ void prepare_packed(curandState *state, unsigned int *global_ta_state, unsigned int *included_literals,
                                unsigned int *included_literals_length, unsigned int *excluded_literals,
                                unsigned int *excluded_literals_length) {

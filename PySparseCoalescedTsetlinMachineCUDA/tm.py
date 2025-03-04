@@ -315,6 +315,16 @@ class CommonTsetlinMachine:
 
 		self.initialized = True
 
+	def reset_clauses(self):
+		self.reset_clauses_gpu(g.state, self.ta_state_gpu, grid=self.grid, block=self.block)
+		cuda.Context.synchronize()
+		cuda.memcpy_dtoh(self.ta_state, self.ta_state_gpu)
+	
+	def reset_weights(self):
+		self.reset_weights_gpu(g.state, self.clause_weights_gpu, grid=self.grid, block=self.block)
+		cuda.Context.synchronize()
+		cuda.memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
+
 	# Transform input data for processing at next layer
 	def transform(self, X) -> csr_matrix:
 		"""Returns csr_matix of clause outputs. Array shape: (num_groups, num_samples, num_clauses)"""
@@ -541,6 +551,8 @@ class CommonTsetlinMachine:
 		mod_prepare = SourceModule(parameters + kernels.code_header + kernels.code_prepare, no_extern_c=True)
 		self.prepare = mod_prepare.get_function("prepare")
 		self.prepare_packed = mod_prepare.get_function("prepare_packed")
+		self.reset_clauses_gpu = mod_prepare.get_function("reset_clauses")
+		self.reset_weights_gpu = mod_prepare.get_function("reset_weights")
 
 		# Update
 		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
