@@ -76,6 +76,8 @@ class CommonTsetlinMachine:
 		self.clause_weights = np.array([])
 		self.patch_weights = np.array([])
 		self.group_ids = np.array(group_ids, dtype=np.uint32)
+		self.clause_freeze = np.array([])
+		self.weights_freeze = np.array([])
 
 		self.negative_clauses = 1  # Default is 1, set to 0 in RegressionTsetlinMachine
 		self.initialized = False
@@ -103,6 +105,13 @@ class CommonTsetlinMachine:
 		self.excluded_literals_length_gpu = cuda.mem_alloc(
 			self.number_of_groups * self.number_of_clauses * 4
 		)  # Number of excluded literals per clause
+
+		self.clause_freeze = np.zeros(self.number_of_groups * self.number_of_clauses, dtype=np.uint32)
+		self.weights_freeze = np.zeros(self.number_of_groups * self.number_of_clauses, dtype=np.uint32)
+		self.clause_freeze_gpu = cuda.mem_alloc(self.clause_freeze.nbytes)
+		self.weights_freeze_gpu = cuda.mem_alloc(self.weights_freeze.nbytes)
+		cuda.memcpy_htod(self.clause_freeze_gpu, self.clause_freeze)
+		cuda.memcpy_htod(self.weights_freeze_gpu, self.weights_freeze)
 
 	def ta_action(self, clause, ta):
 		if np.array_equal(self.ta_state, np.array([])):
@@ -315,15 +324,70 @@ class CommonTsetlinMachine:
 
 		self.initialized = True
 
+	def transfer(self, state_dict: dict, num_classes: int):
+		assert self.number_of_clauses >= state_dict["number_of_clauses"], (
+			f"Number of clauses ({self.number_of_clauses}) should be >= number of clauses in the source model ({state_dict['number_of_clauses']}) "
+		)
+
+		self.number_of_outputs = num_classes
+		self.dim = state_dict["dim"]
+		self.patch_dim = state_dict["patch_dim"]
+		self.min_y = state_dict["min_y"]
+		self.max_y = state_dict["max_y"]
+		self.negative_clauses = state_dict["negative_clauses"]
+
+		self._init_fit()
+		self.init_gpu()
+		self._init_encoded_X()
+		self.reset()
+		self.initialized = True
+
+		# shape of ta_state = (number_of_groups * number_of_clauses * number_of_ta_chunks * number_of_state_bits)
+		self.ta_state = np.empty(
+			(self.number_of_groups * self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits),
+			dtype=np.uint32,
+		)
+		cuda.memcpy_dtoh(self.ta_state, self.ta_state_gpu)
+		self.ta_state[
+			: self.number_of_groups
+			* state_dict["number_of_clauses"]
+			* self.number_of_ta_chunks
+			* self.number_of_state_bits
+		] = state_dict["ta_state"]
+		cuda.memcpy_htod(self.ta_state_gpu, self.ta_state)
+
 	def reset_clauses(self):
 		self.reset_clauses_gpu(g.state, self.ta_state_gpu, grid=self.grid, block=self.block)
 		cuda.Context.synchronize()
 		cuda.memcpy_dtoh(self.ta_state, self.ta_state_gpu)
-	
+
 	def reset_weights(self):
 		self.reset_weights_gpu(g.state, self.clause_weights_gpu, grid=self.grid, block=self.block)
 		cuda.Context.synchronize()
 		cuda.memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
+
+	def freeze_clauses(self, flags):
+		assert len(flags.shape) == 2, "flags should be a 2D array of shape (number_of_groups, number_of_clauses)."
+		assert flags.shape[0] == self.number_of_groups and flags.shape[1] == self.number_of_clauses, (
+			f"Expected shape ({self.number_of_groups}, {self.number_of_clauses}), got {flags.shape}."
+		)
+		self.clause_freeze = np.array(flags, dtype=np.uint32)
+		cuda.memcpy_htod(self.clause_freeze_gpu, self.clause_freeze)
+
+	def freeze_weights(self, flags):
+		assert len(flags.shape) == 2, "flags should be a 2D array of shape (number_of_groups, number_of_clauses)."
+		assert flags.shape[0] == self.number_of_groups and flags.shape[1] == self.number_of_clauses, (
+			f"Expected shape ({self.number_of_groups}, {self.number_of_clauses}), got {flags.shape}."
+		)
+
+		self.weights_freeze = np.array(flags, dtype=np.uint32)
+		cuda.memcpy_htod(self.weights_freeze_gpu, self.weights_freeze)
+
+	def unfreeze_clauses(self):
+		self.freeze_clauses(np.zeros((self.number_of_groups, self.number_of_clauses), dtype=np.uint32))
+
+	def unfreeze_weights(self):
+		self.freeze_weights(np.zeros((self.number_of_groups, self.number_of_clauses), dtype=np.uint32))
 
 	# Transform input data for processing at next layer
 	def transform(self, X) -> csr_matrix:
@@ -557,7 +621,7 @@ class CommonTsetlinMachine:
 		# Update
 		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
 		self.update = mod_update.get_function("update")
-		self.update.prepare("PPPPPPPi")
+		self.update.prepare("PPPPPPPiPP")
 
 		self.evaluate_update = mod_update.get_function("evaluate")
 		self.evaluate_update.prepare("PPPP")
@@ -810,6 +874,8 @@ class CommonTsetlinMachine:
 					self.encoded_X_gpu,
 					self.encoded_Y_gpu,
 					np.int32(e),
+					self.clause_freeze_gpu,
+					self.weights_freeze_gpu,
 				)
 				cuda.Context.synchronize()
 

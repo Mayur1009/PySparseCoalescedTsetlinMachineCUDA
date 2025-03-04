@@ -40,8 +40,8 @@ tm = MultiClassConvolutionalTsetlinMachine2D(
     s,
     (28, 28, 1),
     (patch_size, patch_size),
-    q=q,
-    grid=(16 * 13 * 4, 1, 1),
+    q=1,
+    grid=(16 * 13, 1, 1),
     block=(128, 1, 1),
 )
 

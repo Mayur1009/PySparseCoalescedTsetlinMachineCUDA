@@ -107,7 +107,7 @@ __device__ inline void calculate_clause_output(curandState *localState, unsigned
 
 __device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state, int thresh,
                                      float s, float sr, float q, int clause_output, int clause_patch, int *X, int y,
-                                     int class_sum) {
+                                     int class_sum, unsigned int clause_freeze_flag, unsigned int weights_freeze_flag) {
     int target = 1 - 2 * (class_sum > y);
 
     if (target == -1 && curand_uniform(localState) > 1.0 * q / max(1, CLASSES - 1)) {
@@ -121,63 +121,71 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
         if (target * sign > 0) {
             int included_literals = number_of_include_actions(ta_state);
 
-            if (clause_output && abs(*clause_weight) < INT_MAX) {
+            if (weights_freeze_flag == 0 && clause_output && abs(*clause_weight) < INT_MAX) {
                 (*clause_weight) += sign;
             }
 
-            // Type I Feedback
-            for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
-                // Generate random bit values
+            if (clause_freeze_flag == 0) {
+                // Type I Feedback
+                for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
+                    // Generate random bit values
 
-                if (clause_output && included_literals <= MAX_INCLUDED_LITERALS) {
-                    unsigned int la_feedback = 0;
-                    for (int b = 0; b < INT_SIZE; ++b) {
-                        if (curand_uniform(localState) <= 1.0 / s) {
-                            la_feedback |= (1 << b);
+                    if (clause_output && included_literals <= MAX_INCLUDED_LITERALS) {
+                        unsigned int la_feedback = 0;
+                        for (int b = 0; b < INT_SIZE; ++b) {
+                            if (curand_uniform(localState) <= 1.0 / s) {
+                                la_feedback |= (1 << b);
+                            }
                         }
-                    }
 
 #if BOOST_TRUE_POSITIVE_FEEDBACK == 1
-                    inc(ta_state, 0, la_chunk, X[clause_patch * LA_CHUNKS + la_chunk]);
+                        inc(ta_state, 0, la_chunk, X[clause_patch * LA_CHUNKS + la_chunk]);
 #else
-                    inc(ta_state, 0, la_chunk, X[clause_patch * LA_CHUNKS + la_chunk] & (~la_feedback));
+                        inc(ta_state, 0, la_chunk, X[clause_patch * LA_CHUNKS + la_chunk] & (~la_feedback));
 #endif
 
-                    dec(ta_state, 0, la_chunk, (~X[clause_patch * LA_CHUNKS + la_chunk]) & la_feedback);
-                } else {
-                    // Modification with resistance
-                    int la_feedback = 0;
+                        dec(ta_state, 0, la_chunk, (~X[clause_patch * LA_CHUNKS + la_chunk]) & la_feedback);
+                    } else {
+                        // Modification with resistance
+                        int la_feedback = 0;
 
-                    for (int b = 0; b < INT_SIZE; ++b) {
-                        if (sr != s && (ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & (1 << b))) {
-                            unsigned int cur_state = get_state(ta_state, 0, la_chunk, b);
-                            float t1 = (sr - s) / (sr);
-                            float t2 = (2.0 * (float)cur_state - (float)MAX_STATE) / ((float)MAX_STATE + 2.0);
-                            float mod = 1 - (t1 * pow(t2, 1 / R));
-                            // if (cur_state >= 250)
-                            //     printf("t1 = %f, t2 = %f, mod: %f, 1/s = %f, new 1/s: %f, state: %d\n", t1, t2, mod,
-                            //            1 / s, mod / s, cur_state);
-                            if (curand_uniform(localState) <= mod / s) la_feedback |= (1 << b);
-                        } else {
-                            if (curand_uniform(localState) <= 1.0 / s) la_feedback |= (1 << b);
+                        for (int b = 0; b < INT_SIZE; ++b) {
+                            if (sr != s && (ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & (1 << b))) {
+                                unsigned int cur_state = get_state(ta_state, 0, la_chunk, b);
+                                float t1 = (sr - s) / (sr);
+                                float t2 = (2.0 * (float)cur_state - (float)MAX_STATE) / ((float)MAX_STATE + 2.0);
+                                float mod = 1 - (t1 * pow(t2, 1 / R));
+                                // if (cur_state >= 250)
+                                //     printf("t1 = %f, t2 = %f, mod: %f, 1/s = %f, new 1/s: %f, state: %d\n", t1, t2,
+                                //     mod,
+                                //            1 / s, mod / s, cur_state);
+                                if (curand_uniform(localState) <= mod / s) la_feedback |= (1 << b);
+                            } else {
+                                if (curand_uniform(localState) <= 1.0 / s) la_feedback |= (1 << b);
+                            }
                         }
+                        dec(ta_state, 0, la_chunk, la_feedback);
                     }
-                    dec(ta_state, 0, la_chunk, la_feedback);
                 }
             }
         } else if (target * sign < 0 && clause_output) {
             // Type II Feedback
 
-            (*clause_weight) -= sign;
+            if (weights_freeze_flag == 0) {
+                (*clause_weight) -= sign;
 #if NEGATIVE_CLAUSES == 0
-            if (*clause_weight < 1) {
-                *clause_weight = 1;
-            }
+                if (*clause_weight < 1) {
+                    *clause_weight = 1;
+                }
 #endif
+            }
 
-            for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
-                inc(ta_state, 0, la_chunk,
-                    (~X[clause_patch * LA_CHUNKS + la_chunk]) & (~ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]));
+            if (clause_freeze_flag == 0) {
+                for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
+                    inc(ta_state, 0, la_chunk,
+                        (~X[clause_patch * LA_CHUNKS + la_chunk]) &
+                            (~ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]));
+                }
             }
         }
     }
@@ -232,7 +240,8 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
 
 // Update state of Tsetlin Automata team
 __global__ void update(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *patch_weights,
-                       int *class_sum, int *X, int *y, int example) {
+                       int *class_sum, int *X, int *y, int example, unsigned int *clause_freeze,
+                       unsigned int *weights_freeze) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -249,6 +258,9 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
         unsigned int clause_output;
         int clause_patch;
         calculate_clause_output(&localState, ta_state, &clause_output, &clause_patch, X);
+
+        unsigned int clause_freeze_flag = clause_freeze[combined_clause_id];
+        unsigned int weights_freeze_flag = weights_freeze[combined_clause_id];
 
         for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id) {
             if (group_id == GROUP_ID[class_id]) {
@@ -269,7 +281,7 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
 
                 update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, T[class_id],
                               S[class_id], SR[class_id], Q[class_id], clause_output, clause_patch, X, enc_y,
-                              local_class_sum);
+                              local_class_sum, clause_freeze_flag, weights_freeze_flag);
             }
         }
     }
