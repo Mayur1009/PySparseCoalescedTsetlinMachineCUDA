@@ -67,43 +67,43 @@ __device__ inline unsigned int get_state(unsigned int *ta_state, int clause, int
     return state;
 }
 
-__device__ inline void calculate_clause_output(curandState *localState, unsigned int *ta_state,
-                                               unsigned int *clause_output, int *clause_patch, int *X) {
-    int output_one_patches[PATCHES];
-    int output_one_patches_count;
-
-    // Evaluate each patch (convolution)
-    output_one_patches_count = 0;
-    for (int patch = 0; patch < PATCHES; ++patch) {
-        int patch_clause_output = 1;
-        for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
-            if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + la_chunk]) !=
-                ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]) {
-                patch_clause_output = 0;
-                break;
-            }
-        }
-
-        if (((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + LA_CHUNKS - 1] &
-              FILTER) != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & FILTER))) {
-            patch_clause_output = 0;
-        }
-
-        if (patch_clause_output) {
-            output_one_patches[output_one_patches_count] = patch;
-            output_one_patches_count++;
-        }
-    }
-
-    if (output_one_patches_count > 0) {
-        *clause_output = 1;
-        int patch_id = curand(localState) % output_one_patches_count;
-        *clause_patch = output_one_patches[patch_id];
-    } else {
-        *clause_output = 0;
-        *clause_patch = -1;
-    }
-}
+// __device__ inline void calculate_clause_output(curandState *localState, unsigned int *ta_state,
+//                                                unsigned int *clause_output, int *clause_patch, int *X) {
+//     int output_one_patches[PATCHES];
+//     int output_one_patches_count;
+//
+//     // Evaluate each patch (convolution)
+//     output_one_patches_count = 0;
+//     for (int patch = 0; patch < PATCHES; ++patch) {
+//         int patch_clause_output = 1;
+//         for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
+//             if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + la_chunk]) !=
+//                 ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]) {
+//                 patch_clause_output = 0;
+//                 break;
+//             }
+//         }
+//
+//         if (((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + LA_CHUNKS - 1] &
+//               FILTER) != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & FILTER))) {
+//             patch_clause_output = 0;
+//         }
+//
+//         if (patch_clause_output) {
+//             output_one_patches[output_one_patches_count] = patch;
+//             output_one_patches_count++;
+//         }
+//     }
+//
+//     if (output_one_patches_count > 0) {
+//         *clause_output = 1;
+//         int patch_id = curand(localState) % output_one_patches_count;
+//         *clause_patch = output_one_patches[patch_id];
+//     } else {
+//         *clause_output = 0;
+//         *clause_patch = -1;
+//     }
+// }
 
 __device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state, int thresh,
                                      float s, float sr, float q, int clause_output, int clause_patch, int *X, int y,
@@ -192,9 +192,11 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
 }
 
 // Evaluate example
-__global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int *class_sum, int *X) {
+__global__ void evaluate(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum,
+                         unsigned int *clause_outputs, int *clause_patches, int *X) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
+    curandState localState = state[index];
 
     for (int i = 0; i < CLASSES; i++) {
         class_sum[i] = 0;
@@ -206,28 +208,39 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
         unsigned int *ta_state =
             &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
 
-        int clause_output;
+        int output_one_patches[PATCHES];
+        int output_one_patches_count = 0;
         for (int patch = 0; patch < PATCHES; ++patch) {
-            clause_output = 1;
+            int patch_clause_output = 1;
             for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
                 if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + la_chunk]) !=
                     ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]) {
-                    clause_output = 0;
+                    patch_clause_output = 0;
                     break;
                 }
             }
 
             if ((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + LA_CHUNKS - 1] &
                  FILTER) != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & FILTER)) {
-                clause_output = 0;
+                patch_clause_output = 0;
             }
 
-            if (clause_output) {
-                break;
+            if (patch_clause_output) {
+                output_one_patches[output_one_patches_count] = patch;
+                output_one_patches_count++;
             }
         }
 
-        if (clause_output) {
+        if (output_one_patches_count > 0) {
+            clause_outputs[combined_clause_id] = 1;
+            int patch_id = curand(&localState) % output_one_patches_count;
+            clause_patches[combined_clause_id] = output_one_patches[patch_id];
+        } else {
+            clause_outputs[combined_clause_id] = 0;
+            clause_patches[combined_clause_id] = -1;
+        }
+
+        if (clause_outputs[combined_clause_id]) {
             for (int class_id = 0; class_id < CLASSES; ++class_id) {
                 if (group_id == GROUP_ID[class_id]) {
                     int clause_weight = clause_weights[class_id * CLAUSES + clause];
@@ -236,12 +249,14 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
             }
         }
     }
+
+    state[index] = localState;
 }
 
 // Update state of Tsetlin Automata team
 __global__ void update(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *patch_weights,
-                       int *class_sum, int *X, int *y, int example, unsigned int *clause_freeze,
-                       unsigned int *weights_freeze) {
+                       int *class_sum, unsigned int *clause_outputs, int *clause_patches, int *X, int *y, int example,
+                       unsigned int *clause_freeze, unsigned int *weights_freeze) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -255,9 +270,9 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
         unsigned int *ta_state =
             &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
 
-        unsigned int clause_output;
-        int clause_patch;
-        calculate_clause_output(&localState, ta_state, &clause_output, &clause_patch, X);
+        unsigned int clause_output = clause_outputs[combined_clause_id];
+        int clause_patch = clause_patches[combined_clause_id];
+        // calculate_clause_output(&localState, ta_state, &clause_output, &clause_patch, X);
 
         unsigned int clause_freeze_flag = clause_freeze[combined_clause_id];
         unsigned int weights_freeze_flag = weights_freeze[combined_clause_id];

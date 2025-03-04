@@ -87,10 +87,13 @@ class CommonTsetlinMachine:
 			self.number_of_groups * self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4
 		)
 		self.clause_weights_gpu = cuda.mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
-		self.class_sum_gpu = cuda.mem_alloc(self.number_of_outputs * 4)
 		self.patch_weights_gpu = cuda.mem_alloc(
 			self.number_of_outputs * self.number_of_clauses * self.number_of_patches * 4
 		)
+
+		self.class_sum_gpu = cuda.mem_alloc(self.number_of_outputs * 4)
+		self.clause_outputs_gpu = cuda.mem_alloc(self.number_of_groups * self.number_of_clauses * 4)
+		self.clause_patches_gpu = cuda.mem_alloc(self.number_of_groups * self.number_of_clauses * 4)
 
 		self.included_literals_gpu = cuda.mem_alloc(
 			self.number_of_groups * self.number_of_clauses * self.number_of_features * 2 * 4
@@ -621,10 +624,10 @@ class CommonTsetlinMachine:
 		# Update
 		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
 		self.update = mod_update.get_function("update")
-		self.update.prepare("PPPPPPPiPP")
+		self.update.prepare("PPPPPPPPPiPP")
 
 		self.evaluate_update = mod_update.get_function("evaluate")
-		self.evaluate_update.prepare("PPPP")
+		self.evaluate_update.prepare("PPPPPPP")
 
 		# Evaluate
 		mod_evaluate = SourceModule(parameters + kernels.code_header + kernels.code_evaluate, no_extern_c=True)
@@ -833,8 +836,10 @@ class CommonTsetlinMachine:
 
 		for epoch in range(epochs):
 			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
-				class_sum = np.zeros(self.number_of_outputs).astype(np.int32)
-				cuda.memcpy_htod(self.class_sum_gpu, class_sum)
+				# class_sum = np.zeros(self.number_of_outputs).astype(np.int32)
+				# clause_outputs = np.zeros(self.number_of_groups * self.number_of_clauses, dtype=np.uint32)
+				# clause_patches = np.zeros(self.number_of_groups * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
+				# cuda.memcpy_htod(self.class_sum_gpu, class_sum)
 
 				self.encode.prepared_call(
 					self.grid,
@@ -856,9 +861,12 @@ class CommonTsetlinMachine:
 				self.evaluate_update.prepared_call(
 					self.grid,
 					self.block,
+					g.state,
 					self.ta_state_gpu,
 					self.clause_weights_gpu,
 					self.class_sum_gpu,
+					self.clause_outputs_gpu,
+					self.clause_patches_gpu,
 					self.encoded_X_gpu,
 				)
 				cuda.Context.synchronize()
@@ -871,6 +879,8 @@ class CommonTsetlinMachine:
 					self.clause_weights_gpu,
 					self.patch_weights_gpu,
 					self.class_sum_gpu,
+					self.clause_outputs_gpu,
+					self.clause_patches_gpu,
 					self.encoded_X_gpu,
 					self.encoded_Y_gpu,
 					np.int32(e),
