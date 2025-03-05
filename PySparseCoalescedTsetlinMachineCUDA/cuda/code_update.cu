@@ -67,44 +67,6 @@ __device__ inline unsigned int get_state(unsigned int *ta_state, int clause, int
     return state;
 }
 
-// __device__ inline void calculate_clause_output(curandState *localState, unsigned int *ta_state,
-//                                                unsigned int *clause_output, int *clause_patch, int *X) {
-//     int output_one_patches[PATCHES];
-//     int output_one_patches_count;
-//
-//     // Evaluate each patch (convolution)
-//     output_one_patches_count = 0;
-//     for (int patch = 0; patch < PATCHES; ++patch) {
-//         int patch_clause_output = 1;
-//         for (int la_chunk = 0; la_chunk < LA_CHUNKS - 1; ++la_chunk) {
-//             if ((ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + la_chunk]) !=
-//                 ta_state[la_chunk * STATE_BITS + STATE_BITS - 1]) {
-//                 patch_clause_output = 0;
-//                 break;
-//             }
-//         }
-//
-//         if (((ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & X[patch * LA_CHUNKS + LA_CHUNKS - 1] &
-//               FILTER) != (ta_state[(LA_CHUNKS - 1) * STATE_BITS + STATE_BITS - 1] & FILTER))) {
-//             patch_clause_output = 0;
-//         }
-//
-//         if (patch_clause_output) {
-//             output_one_patches[output_one_patches_count] = patch;
-//             output_one_patches_count++;
-//         }
-//     }
-//
-//     if (output_one_patches_count > 0) {
-//         *clause_output = 1;
-//         int patch_id = curand(localState) % output_one_patches_count;
-//         *clause_patch = output_one_patches[patch_id];
-//     } else {
-//         *clause_output = 0;
-//         *clause_patch = -1;
-//     }
-// }
-
 __device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state, int thresh,
                                      float s, float sr, float q, int clause_output, int clause_patch, int *X, int y,
                                      int class_sum, unsigned int clause_freeze_flag, unsigned int weights_freeze_flag) {

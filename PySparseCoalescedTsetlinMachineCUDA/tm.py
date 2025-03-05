@@ -56,7 +56,6 @@ class CommonTsetlinMachine:
 	):
 		# Initialize Hyperparams
 		self.number_of_clauses = number_of_clauses
-		self.number_of_clause_chunks = (number_of_clauses - 1) / 32 + 1
 		self.number_of_state_bits = number_of_state_bits
 		self.T = T
 		self.s = s
@@ -836,11 +835,6 @@ class CommonTsetlinMachine:
 
 		for epoch in range(epochs):
 			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
-				# class_sum = np.zeros(self.number_of_outputs).astype(np.int32)
-				# clause_outputs = np.zeros(self.number_of_groups * self.number_of_clauses, dtype=np.uint32)
-				# clause_patches = np.zeros(self.number_of_groups * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
-				# cuda.memcpy_htod(self.class_sum_gpu, class_sum)
-
 				self.encode.prepared_call(
 					self.grid,
 					self.block,
