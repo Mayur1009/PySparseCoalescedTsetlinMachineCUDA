@@ -59,7 +59,6 @@ patch_outputs = np.array(patch_outputs.todense()).reshape((2, tm.number_of_claus
 num_loc_lits = M - 1 + N - 1
 half_lits = tm.number_of_features // 2
 
-grp_ids = tm.group_ids
 print(f"{literals.shape=}")
 print(f"{patch_outputs.shape=}")
 

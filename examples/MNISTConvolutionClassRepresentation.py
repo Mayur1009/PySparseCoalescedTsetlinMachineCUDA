@@ -56,7 +56,6 @@ M, N = tm.dim[0] - tm.patch_dim[0] + 1, tm.dim[1] - tm.patch_dim[1] + 1
 
 num_loc_lits = M - 1 + N - 1
 half_lits = tm.number_of_features // 2
-grp_ids = tm.group_ids
 
 print(f"{literals.shape=}")
 
