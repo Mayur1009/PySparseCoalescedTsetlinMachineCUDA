@@ -213,36 +213,48 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
     curandState localState = state[index];
 
     // Calculate clause output first
-    for (int clause = index; clause < CLAUSES; clause += stride) {
-        unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
+    for (int clause_class = index; clause_class < CLAUSES * CLASSES; clause_class += stride) {
+        int clause = clause_class / CLASSES;
+        int class_id = clause_class % CLASSES;
 
-        unsigned int clause_output = clause_outputs[clause];
-        int clause_patch = clause_patches[clause];
-        // calculate_clause_output(&localState, ta_state, &clause_output, &clause_patch, X);
-
-        unsigned int clause_freeze_flag = clause_freeze[clause];
-        unsigned int weights_freeze_flag = weights_freeze[clause];
-
-        for (int class_id = 0; class_id < CLASSES; ++class_id) {
-            int local_class_sum = class_sum[class_id];
-            if (local_class_sum > THRESH) {
-                local_class_sum = THRESH;
-            } else if (local_class_sum < -THRESH) {
-                local_class_sum = -THRESH;
-            }
-            int enc_y = y[example * CLASSES + class_id];
-            if (enc_y > 0)
-                enc_y = THRESH;
-            else
-                enc_y = -THRESH;
-
-            if (clause_patch >= 0) patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
-
-            update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_output, 
-                          clause_patch, X, enc_y, local_class_sum, clause_freeze_flag, weights_freeze_flag);
+        int local_class_sum = class_sum[class_id];
+        if (local_class_sum > THRESH) {
+            local_class_sum = THRESH;
+        } else if (local_class_sum < -THRESH) {
+            local_class_sum = -THRESH;
         }
+        int enc_y = y[example * CLASSES + class_id];
+        if (enc_y > 0)
+            enc_y = THRESH;
+        else
+            enc_y = -THRESH;
+
+        if (clause_patches[clause] >= 0)
+            patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patches[clause]] += 1;
+
+        update_clause(&localState, &clause_weights[class_id * CLAUSES + clause],
+                      &global_ta_state[clause * LA_CHUNKS * STATE_BITS], clause_outputs[clause], clause_patches[clause],
+                      X, enc_y, local_class_sum, clause_freeze[clause], weights_freeze[clause]);
     }
 
     state[index] = localState;
+}
+
+__global__ void sync_ta_states(unsigned int *global_ta_state, unsigned int *batch_ta_state) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    for (int i = index; i < CLAUSES * LA_CHUNKS * STATE_BITS; i += stride) {
+        global_ta_state[i] = batch_ta_state[i];
+    }
+}
+
+__global__ void sync_weights(int *global_clause_weights, int *batch_clause_weights) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    for (int i = index; i < CLASSES * CLAUSES; i += stride) {
+        global_clause_weights[i] = batch_clause_weights[i];
+    }
 }
 }

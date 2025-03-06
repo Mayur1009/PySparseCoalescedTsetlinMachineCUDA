@@ -85,7 +85,11 @@ class CommonTsetlinMachine:
 
 	def allocate_gpu_memory(self):
 		self.ta_state_gpu = mem_alloc(self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4)
+		self.batch_ta_state_gpu = mem_alloc(
+			self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4
+		)
 		self.clause_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
+		self.batch_clause_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
 		self.patch_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * self.number_of_patches * 4)
 
 		self.class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
@@ -563,6 +567,12 @@ class CommonTsetlinMachine:
 		self.evaluate_update = mod_update.get_function("evaluate")
 		self.evaluate_update.prepare("PPPPPPP")
 
+		self.sync_ta_states = mod_update.get_function("sync_ta_states")
+		self.sync_ta_states.prepare("PP")
+
+		self.sync_weights = mod_update.get_function("sync_weights")
+		self.sync_weights.prepare("PP")
+
 		# Evaluate
 		mod_evaluate = SourceModule(parameters + kernels.code_header + kernels.code_evaluate, no_extern_c=True)
 		self.evaluate = mod_evaluate.get_function("evaluate")
@@ -700,14 +710,16 @@ class CommonTsetlinMachine:
 		self.prepare(
 			g.state,
 			self.ta_state_gpu,
+			self.batch_ta_state_gpu,
 			self.clause_weights_gpu,
+			self.batch_clause_weights_gpu,
 			self.class_sum_gpu,
 			grid=self.grid,
 			block=self.block,
 		)
 		ctx.synchronize()
 
-	def _fit(self, X, encoded_Y, epochs=1, incremental=True):
+	def _fit(self, X: csr_matrix, encoded_Y, epochs=1, incremental=True):
 		# Initialize fit
 		if not self.initialized:
 			self._init_fit()
@@ -755,7 +767,7 @@ class CommonTsetlinMachine:
 				memcpy_htod(self.class_sum_gpu, class_sum)
 
 				self.encode.prepared_call(
-					self.grid,
+					(min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1),
 					self.block,
 					self.X_train_indptr_gpu,
 					self.X_train_indices_gpu,
@@ -773,7 +785,7 @@ class CommonTsetlinMachine:
 
 				# Evaluate sample: calculate class_sum, clause_outputs, clause_patches
 				self.evaluate_update.prepared_call(
-					self.grid,
+					(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
 					self.block,
 					g.state,
 					self.ta_state_gpu,
@@ -790,11 +802,18 @@ class CommonTsetlinMachine:
 				# 2. apply_update: applies the changes to the tas and weights for each clause
 
 				self.update.prepared_call(
-					self.grid,
+					(
+						min(
+							self.grid[0],
+							(self.number_of_outputs * self.number_of_clauses + self.block[0] - 1) // self.block[0],
+						),
+						1,
+						1,
+					),
 					self.block,
 					g.state,
-					self.ta_state_gpu,
-					self.clause_weights_gpu,
+					self.batch_ta_state_gpu,
+					self.batch_clause_weights_gpu,
 					self.patch_weights_gpu,
 					self.class_sum_gpu,
 					self.clause_outputs_gpu,
@@ -804,6 +823,41 @@ class CommonTsetlinMachine:
 					np.int32(e),
 					self.clause_freeze_gpu,
 					self.weights_freeze_gpu,
+				)
+				ctx.synchronize()
+
+				self.sync_ta_states.prepared_call(
+					(
+						min(
+							self.grid[0],
+							(
+								self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits
+								+ self.block[0]
+								- 1
+							)
+							// self.block[0],
+						),
+						1,
+						1,
+					),
+					self.block,
+					self.ta_state_gpu,
+					self.batch_ta_state_gpu,
+				)
+				ctx.synchronize()
+
+				self.sync_weights.prepared_call(
+					(
+						min(
+							self.grid[0],
+							(self.number_of_outputs * self.number_of_clauses + self.block[0] - 1) // self.block[0],
+						),
+						1,
+						1,
+					),
+					self.block,
+					self.clause_weights_gpu,
+					self.batch_clause_weights_gpu,
 				)
 				ctx.synchronize()
 
@@ -853,7 +907,7 @@ class CommonTsetlinMachine:
 
 			# Fill encoded_X_packed_gpu with sample e
 			self.encode_packed.prepared_call(
-				self.grid,
+				(min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1),
 				self.block,
 				self.X_test_indptr_gpu,
 				self.X_test_indices_gpu,
@@ -871,7 +925,7 @@ class CommonTsetlinMachine:
 
 			# Evaluate sample and save class_sums in class_sum_gpu
 			self.evaluate_packed.prepared_call(
-				self.grid,
+				(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
 				self.block,
 				self.included_literals_gpu,
 				self.included_literals_length_gpu,
@@ -902,7 +956,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		s,
 		dim,
 		patch_dim,
-		q: float  = 1.0,
+		q: float = 1.0,
 		max_included_literals=None,
 		boost_true_positive_feedback=1,
 		number_of_state_bits=8,
@@ -973,7 +1027,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		s,
 		dim,
 		patch_dim,
-		q: float  = 1.0,
+		q: float = 1.0,
 		max_included_literals=None,
 		boost_true_positive_feedback=1,
 		number_of_state_bits=8,
@@ -1041,7 +1095,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		number_of_clauses,
 		T,
 		s,
-		q: float  = 1.0,
+		q: float = 1.0,
 		max_included_literals=None,
 		boost_true_positive_feedback=1,
 		number_of_state_bits=8,
@@ -1106,7 +1160,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		number_of_clauses,
 		T,
 		s,
-		q: float | list[float] = 1.0,
+		q: float = 1.0,
 		max_included_literals=None,
 		boost_true_positive_feedback=1,
 		number_of_state_bits=8,
@@ -1170,7 +1224,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 		number_of_clauses,
 		T,
 		s,
-		q: float | list[float] = 1.0,
+		q: float = 1.0,
 		max_included_literals=None,
 		boost_true_positive_feedback=1,
 		number_of_state_bits=8,

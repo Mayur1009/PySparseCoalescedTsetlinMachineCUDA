@@ -1,6 +1,7 @@
 #include <curand_kernel.h>
 extern "C" {
-__global__ void prepare(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum) {
+__global__ void prepare(curandState *state, unsigned int *global_ta_state, unsigned int *batch_ta_state,
+                        int *clause_weights, int *batch_clause_weights, int *class_sum) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -8,21 +9,28 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
 
     for (int clause = index; clause < CLAUSES; clause += stride) {
         unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
+        unsigned int *batch_ta_state_clause = &batch_ta_state[clause * LA_CHUNKS * STATE_BITS];
 
         for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
             for (int b = 0; b < STATE_BITS - 1; ++b) {
                 ta_state[la_chunk * STATE_BITS + b] = ~0;
+                batch_ta_state_clause[la_chunk * STATE_BITS + b] = ~0;
             }
             ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] = 0;
+            batch_ta_state_clause[la_chunk * STATE_BITS + STATE_BITS - 1] = 0;
         }
     }
 
     for (int clause = 0; clause < CLAUSES; clause++) {
         for (int class_id = 0; class_id < CLASSES; ++class_id) {
-            if (NEGATIVE_CLAUSES)
-                clause_weights[class_id * CLAUSES + clause] = 1 - 2 * (curand(&localState) % 2);
-            else
+            if (NEGATIVE_CLAUSES) {
+                int val = 1 - 2 * (curand(&localState) % 2);
+                clause_weights[class_id * CLAUSES + clause] = val;
+                batch_clause_weights[class_id * CLAUSES + clause] = val;
+            } else {
                 clause_weights[class_id * CLAUSES + clause] = 1;
+                batch_clause_weights[class_id * CLAUSES + clause] = 1;
+            }
         }
     }
 
@@ -33,6 +41,7 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
     state[index] = localState;
 }
 
+// TODO: Add batch_ta_state
 __global__ void reset_clauses(curandState *state, unsigned int *global_ta_state) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
@@ -53,6 +62,7 @@ __global__ void reset_clauses(curandState *state, unsigned int *global_ta_state)
     state[index] = localState;
 }
 
+// TODO: Add batch_weights
 __global__ void reset_weights(curandState *state, int *clause_weights) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;

@@ -62,9 +62,6 @@ __global__ void evaluate_packed(unsigned int *included_literals, unsigned int *i
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
-    for (int i = 0; i < CLASSES; i++) {
-        class_sum[i] = 0;
-    }
 
     for (int clause = index; clause < CLAUSES; clause += stride) {
         if (included_literals_length[clause] == 0) {
