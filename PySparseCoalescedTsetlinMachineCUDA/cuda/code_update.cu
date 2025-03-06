@@ -116,11 +116,7 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
                                 unsigned int cur_state = get_state(ta_state, 0, la_chunk, b);
                                 float t1 = (sr - s) / (sr);
                                 float t2 = (2.0 * (float)cur_state - (float)MAX_STATE) / ((float)MAX_STATE + 2.0);
-                                float mod = 1 - (t1 * pow(t2, 1 / R));
-                                // if (cur_state >= 250)
-                                //     printf("t1 = %f, t2 = %f, mod: %f, 1/s = %f, new 1/s: %f, state: %d\n", t1, t2,
-                                //     mod,
-                                //            1 / s, mod / s, cur_state);
+                                float mod = 1 - (t1 * pow(t2, 1 / RT));
                                 if (curand_uniform(localState) <= mod / s) la_feedback |= (1 << b);
                             } else {
                                 if (curand_uniform(localState) <= 1.0 / s) la_feedback |= (1 << b);
@@ -159,10 +155,6 @@ __global__ void evaluate(curandState *state, unsigned int *global_ta_state, int 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     curandState localState = state[index];
-
-    for (int i = 0; i < CLASSES; i++) {
-        class_sum[i] = 0;
-    }
 
     for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
         int group_id = combined_clause_id / CLAUSES;
