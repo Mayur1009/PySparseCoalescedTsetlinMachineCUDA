@@ -5,15 +5,12 @@ __global__ void get_literals(unsigned int *global_ta_state, unsigned int *out) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
-    for (int clause = index; clause < CLAUSES; clause += stride) {
+    for (int clause_feature = index; clause_feature < CLAUSES * FEATURES; clause_feature += stride) {
+        int clause = clause_feature / FEATURES;
+        int chunk_nr = (clause_feature % FEATURES) / INT_SIZE;
+        int chunk_pos = (clause_feature % FEATURES) % INT_SIZE;
         unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
-
-        for (int feature = 0; feature < FEATURES; feature++) {
-            int chunk_nr = feature / INT_SIZE;
-            int chunk_pos = feature % INT_SIZE;
-            out[clause * FEATURES + feature] =
-                (ta_state[(chunk_nr * STATE_BITS) + (STATE_BITS - 1)] & (1 << chunk_pos)) > 0;
-        }
+        out[clause_feature] = (ta_state[chunk_nr * STATE_BITS + STATE_BITS - 1] & (1 << chunk_pos)) > 0;
     }
 }
 
@@ -30,18 +27,16 @@ __global__ void get_ta_states(unsigned int *global_ta_state, unsigned int *out) 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
-    for (int clause = index; clause < CLAUSES; clause += stride) {
+    for (int clause_feature = index; clause_feature < CLAUSES * FEATURES; clause_feature += stride) {
+        int clause = clause_feature / FEATURES;
+        int chunk_nr = (clause_feature % FEATURES) / INT_SIZE;
+        int chunk_pos = (clause_feature % FEATURES) % INT_SIZE;
+        unsigned int state = 0;
         unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
+        for (int b = 0; b < STATE_BITS; ++b)
+            if (ta_state[chunk_nr * STATE_BITS + b] & (1 << chunk_pos)) state |= (1 << b);
 
-        for (int feature = 0; feature < FEATURES; feature++) {
-            unsigned int state = 0;
-            int chunk_nr = feature / INT_SIZE;
-            int chunk_pos = feature % INT_SIZE;
-            for (int b = 0; b < STATE_BITS; ++b)
-                if (ta_state[chunk_nr * STATE_BITS + b] & (1 << chunk_pos)) state |= (1 << b);
-
-            out[clause * FEATURES + feature] = state;
-        }
+        out[clause_feature] = state;
     }
 }
 }

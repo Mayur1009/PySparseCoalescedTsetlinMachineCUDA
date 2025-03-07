@@ -131,7 +131,14 @@ class CommonTsetlinMachine:
 		self.get_literals_gpu(
 			self.ta_state_gpu,
 			literals_gpu,
-			grid=self.grid,
+			grid=(
+				min(
+					self.grid[0],
+					(self.number_of_clauses * self.number_of_features + self.block[0] - 1) // self.block[0],
+				),
+				1,
+				1,
+			),
 			block=self.block,
 		)
 		ctx.synchronize()
@@ -145,7 +152,14 @@ class CommonTsetlinMachine:
 		self.get_ta_states_gpu(
 			self.ta_state_gpu,
 			ta_states_gpu,
-			grid=self.grid,
+			grid=(
+				min(
+					self.grid[0],
+					(self.number_of_clauses * self.number_of_features + self.block[0] - 1) // self.block[0],
+				),
+				1,
+				1,
+			),
 			block=self.block,
 		)
 		ctx.synchronize()
@@ -442,7 +456,7 @@ class CommonTsetlinMachine:
 			memcpy_htod(self.encoded_X_packed_gpu, self.encoded_X_packed_base)
 
 			self.encode_packed.prepared_call(
-				self.grid,
+				(min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1),
 				self.block,
 				X_indptr_gpu,
 				X_indices_gpu,
@@ -463,7 +477,7 @@ class CommonTsetlinMachine:
 				self.included_literals_length_gpu,
 				self.encoded_X_packed_gpu,
 				X_transformed_gpu,
-				grid=self.grid,
+				grid=(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
 				block=self.block,
 			)
 			ctx.synchronize()
@@ -512,7 +526,7 @@ class CommonTsetlinMachine:
 			memcpy_htod(self.encoded_X_packed_gpu, self.encoded_X_packed_base)
 
 			self.encode_packed.prepared_call(
-				self.grid,
+				(min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1),
 				self.block,
 				X_indptr_gpu,
 				X_indices_gpu,
@@ -533,7 +547,7 @@ class CommonTsetlinMachine:
 				self.included_literals_length_gpu,
 				self.encoded_X_packed_gpu,
 				X_transformed_gpu,
-				grid=self.grid,
+				grid=(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
 				block=self.block,
 			)
 			ctx.synchronize()
