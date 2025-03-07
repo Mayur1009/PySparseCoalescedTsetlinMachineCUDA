@@ -349,12 +349,37 @@ class CommonTsetlinMachine:
 		memcpy_htod(self.ta_state_gpu, self.ta_state)
 
 	def reset_clauses(self):
-		self.reset_clauses_gpu(g.state, self.ta_state_gpu, grid=self.grid, block=self.block)
+		self.reset_clauses_gpu(
+			self.ta_state_gpu,
+			self.batch_ta_state_gpu,
+			grid=(
+				min(
+					self.grid[0],
+					(self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits + self.block[0] - 1)
+					// self.block[0],
+				),
+				1,
+				1,
+			),
+			block=self.block,
+		)
 		ctx.synchronize()
 		memcpy_dtoh(self.ta_state, self.ta_state_gpu)
 
 	def reset_weights(self):
-		self.reset_weights_gpu(g.state, self.clause_weights_gpu, grid=self.grid, block=self.block)
+		self.reset_weights_gpu(
+			g.state,
+			self.clause_weights_gpu,
+			self.batch_clause_weights_gpu,
+			grid=(
+				min(
+					self.grid[0], (self.number_of_clauses * self.number_of_outputs + self.block[0] - 1) // self.block[0]
+				),
+				1,
+				1,
+			),
+			block=self.block,
+		)
 		ctx.synchronize()
 		memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
 
@@ -407,7 +432,7 @@ class CommonTsetlinMachine:
 			self.included_literals_length_gpu,
 			self.excluded_literals_gpu,
 			self.excluded_literals_length_gpu,
-			grid=self.grid,
+			grid=(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
 			block=self.block,
 		)
 		ctx.synchronize()
@@ -477,7 +502,7 @@ class CommonTsetlinMachine:
 			self.included_literals_length_gpu,
 			self.excluded_literals_gpu,
 			self.excluded_literals_length_gpu,
-			grid=self.grid,
+			grid=(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
 			block=self.block,
 		)
 		ctx.synchronize()
@@ -555,7 +580,10 @@ class CommonTsetlinMachine:
 		# Prepare
 		mod_prepare = SourceModule(parameters + kernels.code_header + kernels.code_prepare, no_extern_c=True)
 		self.prepare = mod_prepare.get_function("prepare")
+		self.prepare.prepare("PPPPP")
+
 		self.prepare_packed = mod_prepare.get_function("prepare_packed")
+
 		self.reset_clauses_gpu = mod_prepare.get_function("reset_clauses")
 		self.reset_weights_gpu = mod_prepare.get_function("reset_weights")
 
@@ -707,15 +735,22 @@ class CommonTsetlinMachine:
 
 	def reset(self):
 		# Reset ta-state and clause_weights
-		self.prepare(
+		self.prepare.prepared_call(
+			(
+				min(
+					self.grid[0],
+					(self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits + self.block[0] - 1)
+					// self.block[0],
+				),
+				1,
+				1,
+			),
+			self.block,
 			g.state,
 			self.ta_state_gpu,
 			self.batch_ta_state_gpu,
 			self.clause_weights_gpu,
 			self.batch_clause_weights_gpu,
-			self.class_sum_gpu,
-			grid=self.grid,
-			block=self.block,
 		)
 		ctx.synchronize()
 
@@ -892,7 +927,7 @@ class CommonTsetlinMachine:
 			self.included_literals_length_gpu,
 			self.excluded_literals_gpu,
 			self.excluded_literals_length_gpu,
-			grid=self.grid,
+			grid=(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
 			block=self.block,
 		)
 		ctx.synchronize()
