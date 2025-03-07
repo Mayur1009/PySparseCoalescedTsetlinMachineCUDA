@@ -1,8 +1,7 @@
 #include <curand_kernel.h>
 extern "C" {
 
-__global__ void prepare(curandState *state, unsigned int *global_ta_state, unsigned int *batch_ta_state,
-                        int *clause_weights, int *batch_clause_weights) {
+__global__ void prepare(curandState *state, unsigned int *global_ta_state, int *clause_weights) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -15,10 +14,8 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, unsig
         int state_bit = (clause_chunk_bit % (LA_CHUNKS * STATE_BITS)) % STATE_BITS;
         if (state_bit == STATE_BITS - 1) {
             global_ta_state[clause_chunk_bit] = 0;
-            batch_ta_state[clause_chunk_bit] = 0;
         } else {
             global_ta_state[clause_chunk_bit] = ~0;
-            batch_ta_state[clause_chunk_bit] = ~0;
         }
 
         if (chunk == 0 && state_bit == 0) {
@@ -26,10 +23,8 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, unsig
                 if (NEGATIVE_CLAUSES) {
                     int val = 1 - 2 * (curand(&localState) % 2);
                     clause_weights[i * CLAUSES + clause] = val;
-                    batch_clause_weights[i * CLAUSES + clause] = val;
                 } else {
                     clause_weights[i * CLAUSES + clause] = 1;
-                    batch_clause_weights[i * CLAUSES + clause] = 1;
                 }
             }
         }
@@ -37,7 +32,7 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, unsig
 
     state[index] = localState;
 }
-__global__ void reset_clauses(unsigned int *global_ta_state, unsigned int *batch_ta_state) {
+__global__ void reset_clauses(unsigned int *global_ta_state) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -46,15 +41,13 @@ __global__ void reset_clauses(unsigned int *global_ta_state, unsigned int *batch
         int state_bit = clause_chunk_bit % STATE_BITS;
         if (state_bit == STATE_BITS - 1) {
             global_ta_state[clause_chunk_bit] = 0;
-            batch_ta_state[clause_chunk_bit] = 0;
         } else {
             global_ta_state[clause_chunk_bit] = ~0;
-            batch_ta_state[clause_chunk_bit] = ~0;
         }
     }
 }
 
-__global__ void reset_weights(curandState *state, int *clause_weights, int *batch_clause_weights) {
+__global__ void reset_weights(curandState *state, int *clause_weights) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -64,10 +57,8 @@ __global__ void reset_weights(curandState *state, int *clause_weights, int *batc
         if (NEGATIVE_CLAUSES) {
             int val = 1 - 2 * (curand(&localState) % 2);
             clause_weights[class_clause] = val;
-            batch_clause_weights[class_clause] = val;
         } else {
             clause_weights[class_clause] = 1;
-            batch_clause_weights[class_clause] = 1;
         }
     }
 

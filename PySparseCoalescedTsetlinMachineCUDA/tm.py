@@ -85,11 +85,7 @@ class CommonTsetlinMachine:
 
 	def allocate_gpu_memory(self):
 		self.ta_state_gpu = mem_alloc(self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4)
-		self.batch_ta_state_gpu = mem_alloc(
-			self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4
-		)
 		self.clause_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
-		self.batch_clause_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
 		self.patch_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * self.number_of_patches * 4)
 
 		self.class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
@@ -365,7 +361,6 @@ class CommonTsetlinMachine:
 	def reset_clauses(self):
 		self.reset_clauses_gpu(
 			self.ta_state_gpu,
-			self.batch_ta_state_gpu,
 			grid=(
 				min(
 					self.grid[0],
@@ -384,7 +379,6 @@ class CommonTsetlinMachine:
 		self.reset_weights_gpu(
 			g.state,
 			self.clause_weights_gpu,
-			self.batch_clause_weights_gpu,
 			grid=(
 				min(
 					self.grid[0], (self.number_of_clauses * self.number_of_outputs + self.block[0] - 1) // self.block[0]
@@ -594,7 +588,7 @@ class CommonTsetlinMachine:
 		# Prepare
 		mod_prepare = SourceModule(parameters + kernels.code_header + kernels.code_prepare, no_extern_c=True)
 		self.prepare = mod_prepare.get_function("prepare")
-		self.prepare.prepare("PPPPP")
+		self.prepare.prepare("PPP")
 
 		self.prepare_packed = mod_prepare.get_function("prepare_packed")
 
@@ -762,9 +756,7 @@ class CommonTsetlinMachine:
 			self.block,
 			g.state,
 			self.ta_state_gpu,
-			self.batch_ta_state_gpu,
 			self.clause_weights_gpu,
-			self.batch_clause_weights_gpu,
 		)
 		ctx.synchronize()
 
@@ -797,16 +789,6 @@ class CommonTsetlinMachine:
 
 		class_sum = np.zeros(self.number_of_outputs, dtype=np.int32)
 		for epoch in range(epochs):
-			# TODO: training strategy
-			# 1. Get indices of samples for each class.
-			# 2. Assign each index same probability of being selected.
-			# 3. Randomly select samples from each class.
-			# 4. Combine the selected samples into a batch
-			# 5. Maintain a state_change and weight change array
-			# 5. For each sample in the batch:
-			# 	5.1. Encode sample
-			# 	5.2. Evaluate class_sum, clause_outputs, clause_patches
-			# 	5.3. Calculate the changes in state and weights
 
 			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
 				# Reset encoded_X_gpu
@@ -846,9 +828,6 @@ class CommonTsetlinMachine:
 				)
 				ctx.synchronize()
 
-				# TODO: Change update:
-				# 1. calc_update: calculates state and weight changes for each clause
-				# 2. apply_update: applies the changes to the tas and weights for each clause
 
 				self.update.prepared_call(
 					(
@@ -861,8 +840,8 @@ class CommonTsetlinMachine:
 					),
 					self.block,
 					g.state,
-					self.batch_ta_state_gpu,
-					self.batch_clause_weights_gpu,
+					self.ta_state_gpu,
+					self.clause_weights_gpu,
 					self.patch_weights_gpu,
 					self.class_sum_gpu,
 					self.clause_outputs_gpu,
@@ -874,44 +853,6 @@ class CommonTsetlinMachine:
 					self.weights_freeze_gpu,
 				)
 				ctx.synchronize()
-
-				self.sync_ta_states.prepared_call(
-					(
-						min(
-							self.grid[0],
-							(
-								self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits
-								+ self.block[0]
-								- 1
-							)
-							// self.block[0],
-						),
-						1,
-						1,
-					),
-					self.block,
-					self.ta_state_gpu,
-					self.batch_ta_state_gpu,
-				)
-				ctx.synchronize()
-
-				self.sync_weights.prepared_call(
-					(
-						min(
-							self.grid[0],
-							(self.number_of_outputs * self.number_of_clauses + self.block[0] - 1) // self.block[0],
-						),
-						1,
-						1,
-					),
-					self.block,
-					self.clause_weights_gpu,
-					self.batch_clause_weights_gpu,
-				)
-				ctx.synchronize()
-
-		self.ta_state = np.array([])
-		self.clause_weights = np.array([])
 
 		return
 
