@@ -763,16 +763,21 @@ class CommonTsetlinMachine:
 		)
 		ctx.synchronize()
 
-	def create_batches(self, encoded_Y, num_batches):
-		batches = np.zeros((num_batches, self.number_of_outputs), dtype=np.uint32)
-		prob = np.array(encoded_Y, dtype=np.float64) / np.sum(encoded_Y, axis=0, dtype=np.float64)
+	def _create_batches(self, encoded_Y, mini_batches, num_samples_per_class):
+		"""Creates mini-batches for training."""
+		batches = np.zeros((mini_batches, self.number_of_outputs), dtype=np.uint32)
+		if num_samples_per_class is None:
+			num_samples_per_class = np.sum(encoded_Y, axis=0)
+		prob = np.array(encoded_Y, dtype=np.float64) / num_samples_per_class.astype(np.float64)
 		iota = np.arange(encoded_Y.shape[0])
 		for c in tqdm(range(self.number_of_outputs), leave=False, desc="Create Batches"):
-			batches[:, c] = self.rng.choice(iota, num_batches, p=prob[:, c])
+			batches[:, c] = self.rng.choice(iota, mini_batches, p=prob[:, c])
 
 		return batches
 
-	def _fit(self, X: csr_matrix, encoded_Y, epochs=1, incremental=True, num_batches: int = 0):
+	def _fit(
+		self, X: csr_matrix, encoded_Y, epochs=1, incremental=True, mini_batches: int = 0, num_samples_per_class=None
+	):
 		# Initialize fit
 		if not self.initialized:
 			self._init_fit()
@@ -801,14 +806,14 @@ class CommonTsetlinMachine:
 
 		class_sum = np.zeros(self.number_of_outputs, dtype=np.int32)
 		for _ in range(epochs):
-			if num_batches == 0:
+			if mini_batches == 0:
 				batches = np.array([[i] for i in range(X.shape[0])], dtype=np.uint32)
-				num_batches = X.shape[0]
+				mini_batches = X.shape[0]
 
 			else:
-				batches = self.create_batches(encoded_Y, num_batches)
+				batches = self._create_batches(encoded_Y, mini_batches, num_samples_per_class)
 
-			for batch_ind in tqdm(range(num_batches), leave=False, desc="Fit Batch"):
+			for batch_ind in tqdm(range(mini_batches), leave=False, desc="Fit Batch"):
 				encoded_X_batches = [mem_alloc(self.encoded_X_base.nbytes) for _ in range(len(batches[batch_ind]))]
 				class_sum_batches = [mem_alloc(class_sum.nbytes) for _ in range(len(batches[batch_ind]))]
 				clause_outputs_batches = [mem_alloc(self.number_of_clauses * 4) for _ in range(len(batches[batch_ind]))]
@@ -998,7 +1003,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		self.patch_dim = patch_dim
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False, num_batches=0):
+	def fit(self, X, Y, epochs=100, incremental=False, mini_batches=0, num_samples_per_class=None):
 		if len(X.shape) == 3:
 			print(f"Expecting X with 2D shape, got {X.shape}. Flattening the array...")
 			X = X.reshape((X.shape[0], -1))
@@ -1014,7 +1019,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		for i in range(self.number_of_outputs):
 			encoded_Y[:, i] = np.where(Y == i, 1, 0)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_batches=num_batches)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
 
 	def score(self, X):
 		X = csr_matrix(X)
@@ -1069,7 +1074,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		self.patch_dim = patch_dim
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False, num_batches=0):
+	def fit(self, X, Y, epochs=100, incremental=False, mini_batches=0, num_samples_per_class=None):
 		if len(X.shape) == 3:
 			print(f"Expecting X with 2D shape, got {X.shape}. Flattening the array...")
 			X = X.reshape((X.shape[0], -1))
@@ -1083,7 +1088,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_batches=num_batches)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
 
 	def score(self, X):
 		X = csr_matrix(X)
@@ -1135,7 +1140,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		)
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False, num_batches=0):
+	def fit(self, X, Y, epochs=100, incremental=False, mini_batches=0, num_samples_per_class=None):
 		X = csr_matrix(X)
 
 		self.number_of_outputs = Y.shape[1]
@@ -1147,7 +1152,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		self.min_y = None
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_batches=num_batches)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
 
 		return
 
@@ -1200,7 +1205,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		)
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False, num_batches=0):
+	def fit(self, X, Y, epochs=100, incremental=False, mini_batches=0, num_samples_per_class=None):
 		X = csr_matrix(X)
 
 		self.number_of_outputs = int(np.max(Y) + 1)
@@ -1215,7 +1220,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		for i in range(self.number_of_outputs):
 			encoded_Y[:, i] = np.where(Y == i, 1, 0)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_batches=num_batches)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
 
 		return
 
@@ -1264,7 +1269,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 		)
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False, num_batches=0):
+	def fit(self, X, Y, epochs=100, incremental=False, mini_batches=0, num_samples_per_class=None):
 		X = X.reshape(X.shape[0], X.shape[1], 1)
 
 		self.number_of_outputs = 1
@@ -1275,7 +1280,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_batches=num_batches)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
 
 		return
 
@@ -1324,7 +1329,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 		)
 		self.negative_clauses = 0
 
-	def fit(self, X, Y, epochs=100, incremental=False, num_batches=0):
+	def fit(self, X, Y, epochs=100, incremental=False):
 		X = X.reshape(X.shape[0], X.shape[1], 1)
 
 		self.number_of_outputs = 1
@@ -1335,7 +1340,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 
 		encoded_Y = ((Y - self.min_y) / (self.max_y - self.min_y) * self.T).astype(np.int32)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_batches=num_batches)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
 		return
 
