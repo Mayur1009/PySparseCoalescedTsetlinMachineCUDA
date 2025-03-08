@@ -51,6 +51,7 @@ class CommonTsetlinMachine:
 		append_negated: bool = True,
 		r: float = 1.0,
 		sr: float | list[float] | None = None,
+		np_seed: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -82,6 +83,8 @@ class CommonTsetlinMachine:
 
 		self.negative_clauses = 1  # Default is 1, set to 0 in RegressionTsetlinMachine
 		self.initialized = False
+
+		self.rng = np.random.default_rng(np_seed)
 
 	def allocate_gpu_memory(self):
 		self.ta_state_gpu = mem_alloc(self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4)
@@ -760,7 +763,16 @@ class CommonTsetlinMachine:
 		)
 		ctx.synchronize()
 
-	def _fit(self, X: csr_matrix, encoded_Y, epochs=1, incremental=True):
+	def create_batches(self, encoded_Y, num_batches):
+		batches = np.zeros((num_batches, self.number_of_outputs), dtype=np.uint32)
+		prob = np.array(encoded_Y, dtype=np.float64) / np.sum(encoded_Y, axis=0, dtype=np.float64)
+		iota = np.arange(encoded_Y.shape[0])
+		for c in tqdm(range(self.number_of_outputs), leave=False, desc="Create Batches"):
+			batches[:, c] = self.rng.choice(iota, num_batches, p=prob[:, c])
+
+		return batches
+
+	def _fit(self, X: csr_matrix, encoded_Y, epochs=1, incremental=True, num_batches: int = 0):
 		# Initialize fit
 		if not self.initialized:
 			self._init_fit()
@@ -788,71 +800,83 @@ class CommonTsetlinMachine:
 			memcpy_htod(self.encoded_Y_gpu, encoded_Y)
 
 		class_sum = np.zeros(self.number_of_outputs, dtype=np.int32)
-		for epoch in range(epochs):
+		for _ in range(epochs):
+			if num_batches == 0:
+				batches = np.array([[i] for i in range(X.shape[0])], dtype=np.uint32)
+				num_batches = X.shape[0]
 
-			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
-				# Reset encoded_X_gpu
-				memcpy_htod(self.encoded_X_gpu, self.encoded_X_base)
+			else:
+				batches = self.create_batches(encoded_Y, num_batches)
 
-				# Reset class_sum_gpu
-				memcpy_htod(self.class_sum_gpu, class_sum)
+			for batch_ind in tqdm(range(num_batches), leave=False, desc="Fit Batch"):
+				encoded_X_batches = [mem_alloc(self.encoded_X_base.nbytes) for _ in range(len(batches[batch_ind]))]
+				class_sum_batches = [mem_alloc(class_sum.nbytes) for _ in range(len(batches[batch_ind]))]
+				clause_outputs_batches = [mem_alloc(self.number_of_clauses * 4) for _ in range(len(batches[batch_ind]))]
+				clause_patches_batches = [mem_alloc(self.number_of_clauses * 4) for _ in range(len(batches[batch_ind]))]
 
-				self.encode.prepared_call(
-					(min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1),
-					self.block,
-					self.X_train_indptr_gpu,
-					self.X_train_indices_gpu,
-					self.encoded_X_gpu,
-					np.int32(e),
-					np.int32(self.dim[0]),
-					np.int32(self.dim[1]),
-					np.int32(self.dim[2]),
-					np.int32(self.patch_dim[0]),
-					np.int32(self.patch_dim[1]),
-					np.int32(self.append_negated),
-					np.int32(0),
-				)
-				ctx.synchronize()
+				for i, e in enumerate(batches[batch_ind]):
+					# Reset encoded_X_gpu
+					memcpy_htod(encoded_X_batches[i], self.encoded_X_base)
 
-				# Evaluate sample: calculate class_sum, clause_outputs, clause_patches
-				self.evaluate_update.prepared_call(
-					(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
-					self.block,
-					g.state,
-					self.ta_state_gpu,
-					self.clause_weights_gpu,
-					self.class_sum_gpu,
-					self.clause_outputs_gpu,
-					self.clause_patches_gpu,
-					self.encoded_X_gpu,
-				)
-				ctx.synchronize()
+					# Reset class_sum_gpu
+					memcpy_htod(class_sum_batches[i], class_sum)
 
+					self.encode.prepared_call(
+						(min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1),
+						self.block,
+						self.X_train_indptr_gpu,
+						self.X_train_indices_gpu,
+						encoded_X_batches[i],
+						np.int32(e),
+						np.int32(self.dim[0]),
+						np.int32(self.dim[1]),
+						np.int32(self.dim[2]),
+						np.int32(self.patch_dim[0]),
+						np.int32(self.patch_dim[1]),
+						np.int32(self.append_negated),
+						np.int32(0),
+					)
+					ctx.synchronize()
 
-				self.update.prepared_call(
-					(
-						min(
-							self.grid[0],
-							(self.number_of_outputs * self.number_of_clauses + self.block[0] - 1) // self.block[0],
+					# Evaluate sample: calculate class_sum, clause_outputs, clause_patches
+					self.evaluate_update.prepared_call(
+						(min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1),
+						self.block,
+						g.state,
+						self.ta_state_gpu,
+						self.clause_weights_gpu,
+						class_sum_batches[i],
+						clause_outputs_batches[i],
+						clause_patches_batches[i],
+						encoded_X_batches[i],
+					)
+					ctx.synchronize()
+
+				for i, e in enumerate(batches[batch_ind]):
+					self.update.prepared_call(
+						(
+							min(
+								self.grid[0],
+								(self.number_of_outputs * self.number_of_clauses + self.block[0] - 1) // self.block[0],
+							),
+							1,
+							1,
 						),
-						1,
-						1,
-					),
-					self.block,
-					g.state,
-					self.ta_state_gpu,
-					self.clause_weights_gpu,
-					self.patch_weights_gpu,
-					self.class_sum_gpu,
-					self.clause_outputs_gpu,
-					self.clause_patches_gpu,
-					self.encoded_X_gpu,
-					self.encoded_Y_gpu,
-					np.int32(e),
-					self.clause_freeze_gpu,
-					self.weights_freeze_gpu,
-				)
-				ctx.synchronize()
+						self.block,
+						g.state,
+						self.ta_state_gpu,
+						self.clause_weights_gpu,
+						self.patch_weights_gpu,
+						class_sum_batches[i],
+						clause_outputs_batches[i],
+						clause_patches_batches[i],
+						encoded_X_batches[i],
+						self.encoded_Y_gpu,
+						np.int32(e),
+						self.clause_freeze_gpu,
+						self.weights_freeze_gpu,
+					)
+					ctx.synchronize()
 
 		return
 
