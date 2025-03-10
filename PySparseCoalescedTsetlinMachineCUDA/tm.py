@@ -1239,7 +1239,7 @@ class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
 			self.active_output_gpu = mem_alloc(self.active_output.nbytes)
 			memcpy_htod(self.active_output_gpu, self.active_output)
 
-	def _fit(self, X_csr, encoded_Y, number_of_examples, epochs, incremental=False):
+	def _fit(self, X_csr, encoded_Y, number_of_examples, epochs, incremental=False):  # pyright: ignore[reportIncompatibleMethodOverride]
 		self._init_fit(X_csr, encoded_Y, incremental=incremental)
 
 		for epoch in range(epochs):

@@ -34,26 +34,26 @@ def get_kernel(file):
 
 
 code_header = """
-	#include <curand_kernel.h>
+#include <curand_kernel.h>
 	
-	#define INT_SIZE 32
+#define INT_SIZE 32
 
-	#define LA_CHUNKS (((FEATURES-1)/INT_SIZE + 1))
-	#define CLAUSE_CHUNKS ((CLAUSES-1)/INT_SIZE + 1)
+#define LA_CHUNKS (((FEATURES-1)/INT_SIZE + 1))
+#define CLAUSE_CHUNKS ((CLAUSES-1)/INT_SIZE + 1)
 
-	#if (FEATURES % 32 != 0)
-	#define FILTER (~(0xffffffff << (FEATURES % INT_SIZE)))
-	#else
-	#define FILTER 0xffffffff
-	#endif
+#if (FEATURES % 32 != 0)
+#define FILTER (~(0xffffffff << (FEATURES % INT_SIZE)))
+#else
+#define FILTER 0xffffffff
+#endif
 
-	#define PATCH_CHUNKS (((PATCHES-1)/INT_SIZE + 1))
+#define PATCH_CHUNKS (((PATCHES-1)/INT_SIZE + 1))
 
-	#if (PATCH_CHUNKS % 32 != 0)
-	#define PATCH_FILTER (~(0xffffffff << (PATCHES % INT_SIZE)))
-	#else
-	#define PATCH_FILTER 0xffffffff
-	#endif
+#if (PATCH_CHUNKS % 32 != 0)
+#define PATCH_FILTER (~(0xffffffff << (PATCHES % INT_SIZE)))
+#else
+#define PATCH_FILTER 0xffffffff
+#endif
 """
 
 code_update = get_kernel("cuda/code_update.cu")
