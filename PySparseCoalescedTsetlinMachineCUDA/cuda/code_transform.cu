@@ -1,4 +1,3 @@
-#include <curand_kernel.h>
 extern "C" {
 // Transform examples
 

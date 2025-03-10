@@ -1,4 +1,3 @@
-#include <curand_kernel.h>
 extern "C" {
 
 __global__ void get_literals(unsigned int *global_ta_state, unsigned int *out) {
