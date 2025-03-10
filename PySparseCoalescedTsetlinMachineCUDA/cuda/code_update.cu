@@ -183,10 +183,6 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
-    for (int i = 0; i < CLASSES; i++) {
-        class_sum[i] = 0;
-    }
-
     for (int clause = index; clause < CLAUSES; clause += stride) {
         unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
 
