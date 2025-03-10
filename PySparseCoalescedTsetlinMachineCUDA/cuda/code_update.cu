@@ -200,8 +200,8 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
 
     // Calculate clause output first
     for (int clause_class = index; clause_class < CLAUSES * CLASSES; clause_class += stride) {
-        int clause = clause_class / CLASSES;
-        int class_id = clause_class % CLASSES;
+        int clause = clause_class % CLAUSES;
+        int class_id = clause_class / CLAUSES;
         unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
         int local_class_sum = class_sum[class_id];
         if (local_class_sum > THRESH) {
