@@ -82,7 +82,158 @@ class CommonTsetlinMachine:
 		self.negative_clauses = 1  # Default is 1, set to 0 in RegressionTsetlinMachine
 		self.initialized = False
 
-	def allocate_gpu_memory(self):
+	#### FIT AND SCORE ####
+	def _fit(self, X, encoded_Y, epochs=1, incremental=True):
+		# Initialize fit
+		if not self.initialized:
+			self._init_fit()
+			self._init_kernels()
+			self._init_encoded_X()
+			self._reset_states_weights()
+			self.initialized = True
+
+		# If not incremental, clear ta-state and clause_weghts
+		elif not incremental:
+			self._reset_states_weights()
+
+		# Copy data to Gpu
+		if not np.array_equal(self.X_train, np.concatenate((X.indptr, X.indices))):
+			self.X_train = np.concatenate((X.indptr, X.indices))
+			self.X_train_indptr_gpu = mem_alloc(X.indptr.nbytes)
+			memcpy_htod(self.X_train_indptr_gpu, X.indptr)
+
+			self.X_train_indices_gpu = mem_alloc(X.indices.nbytes)
+			memcpy_htod(self.X_train_indices_gpu, X.indices)
+
+		if not np.array_equal(self.encoded_Y, encoded_Y):
+			self.encoded_Y = encoded_Y
+			self.encoded_Y_gpu = mem_alloc(encoded_Y.nbytes)
+			memcpy_htod(self.encoded_Y_gpu, encoded_Y)
+
+		class_sum = np.zeros(self.number_of_outputs).astype(np.int32)
+		for epoch in range(epochs):
+			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
+				memcpy_htod(self.class_sum_gpu, class_sum)
+				memcpy_htod(self.encoded_X_gpu, self.encoded_X_base)
+
+				self.encode.prepared_call(
+					self.grid,
+					self.block,
+					self.X_train_indptr_gpu,
+					self.X_train_indices_gpu,
+					self.encoded_X_gpu,
+					np.int32(e),
+					np.int32(self.dim[0]),
+					np.int32(self.dim[1]),
+					np.int32(self.dim[2]),
+					np.int32(self.patch_dim[0]),
+					np.int32(self.patch_dim[1]),
+					np.int32(self.append_negated),
+					np.int32(0),
+				)
+				ctx.synchronize()
+
+				self.evaluate_update.prepared_call(
+					self.grid,
+					self.block,
+					g.state,
+					self.ta_state_gpu,
+					self.clause_weights_gpu,
+					self.class_sum_gpu,
+					self.clause_outputs_gpu,
+					self.clause_patches_gpu,
+					self.encoded_X_gpu,
+				)
+				ctx.synchronize()
+
+				self.update.prepared_call(
+					self.grid,
+					self.block,
+					g.state,
+					self.ta_state_gpu,
+					self.clause_weights_gpu,
+					self.patch_weights_gpu,
+					self.class_sum_gpu,
+					self.clause_outputs_gpu,
+					self.clause_patches_gpu,
+					self.encoded_X_gpu,
+					self.encoded_Y_gpu,
+					np.int32(e),
+				)
+				ctx.synchronize()
+
+		self.ta_state = np.array([])
+		self.clause_weights = np.array([])
+
+		return
+
+	def _score(self, X):
+		if not self.initialized:
+			print("Error: Model not trained.")
+			sys.exit(-1)
+
+		if not np.array_equal(self.X_test, np.concatenate((X.indptr, X.indices))):
+			self.X_test = np.concatenate((X.indptr, X.indices))
+
+			self.X_test_indptr_gpu = mem_alloc(X.indptr.nbytes)
+			memcpy_htod(self.X_test_indptr_gpu, X.indptr)
+
+			self.X_test_indices_gpu = mem_alloc(X.indices.nbytes)
+			memcpy_htod(self.X_test_indices_gpu, X.indices)
+
+		self.prepare_packed(
+			g.state,
+			self.ta_state_gpu,
+			self.included_literals_gpu,
+			self.included_literals_length_gpu,
+			self.excluded_literals_gpu,
+			self.excluded_literals_length_gpu,
+			grid=self.grid,
+			block=self.block,
+		)
+		ctx.synchronize()
+
+		class_sum = np.zeros((X.shape[0], self.number_of_outputs), dtype=np.int32)
+		for e in tqdm(range(X.shape[0]), leave=False, desc="Predict"):
+			memcpy_htod(self.class_sum_gpu, class_sum[e, :])
+			memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
+
+			self.encode_packed.prepared_call(
+				self.grid,
+				self.block,
+				self.X_test_indptr_gpu,
+				self.X_test_indices_gpu,
+				self.encoded_X_packed_gpu,
+				np.int32(e),
+				np.int32(self.dim[0]),
+				np.int32(self.dim[1]),
+				np.int32(self.dim[2]),
+				np.int32(self.patch_dim[0]),
+				np.int32(self.patch_dim[1]),
+				np.int32(self.append_negated),
+				np.int32(0),
+			)
+			ctx.synchronize()
+
+			self.evaluate_packed.prepared_call(
+				self.grid,
+				self.block,
+				self.included_literals_gpu,
+				self.included_literals_length_gpu,
+				self.excluded_literals_gpu,
+				self.excluded_literals_length_gpu,
+				self.clause_weights_gpu,
+				self.class_sum_gpu,
+				self.encoded_X_packed_gpu,
+			)
+			ctx.synchronize()
+
+			memcpy_dtoh(class_sum[e, :], self.class_sum_gpu)
+
+		return class_sum
+
+	#### GPU INITIALIZATION ####
+	def _allocate_gpu_memory(self):
 		self.ta_state_gpu = mem_alloc(self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4)
 		self.clause_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
 		self.class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
@@ -101,6 +252,187 @@ class CommonTsetlinMachine:
 		# Number of excluded literals per clause
 		self.excluded_literals_length_gpu = mem_alloc(self.number_of_clauses * 4)
 
+	def _init_kernels(self):
+		# Encode and pack input
+		mod_encode = SourceModule(kernels.code_encode, no_extern_c=True)
+		self.encode = mod_encode.get_function("encode")
+		self.encode.prepare("PPPiiiiiiii")
+
+		self.encode_packed = mod_encode.get_function("encode_packed")
+		self.encode_packed.prepare("PPPiiiiiiii")
+
+		self.produce_autoencoder_examples = mod_encode.get_function("produce_autoencoder_example")
+		self.produce_autoencoder_examples.prepare("PPiPPiPPiPPiiii")
+
+		parameters = f"""
+		#define CLAUSES {self.number_of_clauses}
+		#define THRESH {self.T}
+		#define S {self.s}
+		#define Q {self.q}
+		#define STATE_BITS {self.number_of_state_bits}
+		#define BOOST_TRUE_POSITIVE_FEEDBACK {self.boost_true_positive_feedback}
+		#define MAX_INCLUDED_LITERALS {self.max_included_literals}
+		#define NEGATIVE_CLAUSES {self.negative_clauses}
+		#define RESISTANCE {self.r}
+		#define SR {self.sr}
+		#define CLASSES {self.number_of_outputs}
+		#define FEATURES {self.number_of_features}
+		#define PATCHES {self.number_of_patches}
+		#define MAX_STATE {(1 << self.number_of_state_bits) - 1}
+		"""
+
+		# Prepare
+		mod_prepare = SourceModule(parameters + kernels.code_header + kernels.code_prepare, no_extern_c=True)
+		self.prepare = mod_prepare.get_function("prepare")
+		self.prepare_packed = mod_prepare.get_function("prepare_packed")
+
+		# Update
+		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
+		self.update = mod_update.get_function("update")
+		self.update.prepare("PPPPPPPPPi")
+
+		self.evaluate_update = mod_update.get_function("evaluate")
+		self.evaluate_update.prepare("PPPPPPP")
+
+		# Evaluate
+		mod_evaluate = SourceModule(parameters + kernels.code_header + kernels.code_evaluate, no_extern_c=True)
+		self.evaluate = mod_evaluate.get_function("evaluate")
+		self.evaluate.prepare("PPPP")
+
+		self.evaluate_packed = mod_evaluate.get_function("evaluate_packed")
+		self.evaluate_packed.prepare("PPPPPPP")
+
+		# Transform
+		mod_transform = SourceModule(parameters + kernels.code_header + kernels.code_transform, no_extern_c=True)
+		self.transform_gpu = mod_transform.get_function("transform")
+		self.transform_gpu.prepare("PPPP")
+
+		self.transform_patchwise_gpu = mod_transform.get_function("transform_patchwise")
+		self.transform_patchwise_gpu.prepare("PPPP")
+
+		# Misc Clause operations
+		mod_clauses = SourceModule(parameters + kernels.code_header + kernels.code_clauses, no_extern_c=True)
+		self.get_literals_gpu = mod_clauses.get_function("get_literals")
+		self.get_literals_gpu.prepare("PP")
+
+		self.get_ta_states_gpu = mod_clauses.get_function("get_ta_states")
+		self.get_ta_states_gpu.prepare("PP")
+
+		self._allocate_gpu_memory()
+
+	#### STATES, WEIGHTS, AND INPUT INITIALIZATION ####
+	def _reset_states_weights(self):
+		self.prepare(
+			g.state,
+			self.ta_state_gpu,
+			self.clause_weights_gpu,
+			self.class_sum_gpu,
+			grid=self.grid,
+			block=self.block,
+		)
+		ctx.synchronize()
+
+	def _init_encoded_X(self):
+		encoded_X = np.zeros((self.number_of_patches, self.number_of_ta_chunks), dtype=np.uint32)
+		for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
+			for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
+				p = patch_coordinate_y * (self.dim[0] - self.patch_dim[0] + 1) + patch_coordinate_x
+
+				if self.append_negated:
+					for k in range(self.number_of_features // 2, self.number_of_features):
+						chunk = k // 32
+						pos = k % 32
+						encoded_X[p, chunk] |= 1 << pos
+
+				for y_threshold in range(self.dim[1] - self.patch_dim[1]):
+					patch_pos = y_threshold
+					if patch_coordinate_y > y_threshold:
+						chunk = patch_pos // 32
+						pos = patch_pos % 32
+						encoded_X[p, chunk] |= 1 << pos
+
+						if self.append_negated:
+							chunk = (patch_pos + self.number_of_features // 2) // 32
+							pos = (patch_pos + self.number_of_features // 2) % 32
+							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
+
+				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
+					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
+					if patch_coordinate_x > x_threshold:
+						chunk = patch_pos // 32
+						pos = patch_pos % 32
+						encoded_X[p, chunk] |= 1 << pos
+
+						if self.append_negated:
+							chunk = (patch_pos + self.number_of_features // 2) // 32
+							pos = (patch_pos + self.number_of_features // 2) % 32
+							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
+
+		self.encoded_X_base = encoded_X.reshape(-1)
+		self.encoded_X_gpu = mem_alloc(self.encoded_X_base.nbytes)
+		memcpy_htod(self.encoded_X_gpu, self.encoded_X_base)
+
+		# Encoded X packed
+		encoded_X_packed = np.zeros(((self.number_of_patches - 1) // 32 + 1, self.number_of_features), dtype=np.uint32)
+		if self.append_negated:
+			for p_chunk in range((self.number_of_patches - 1) // 32 + 1):
+				for k in range(self.number_of_features // 2, self.number_of_features):
+					encoded_X_packed[p_chunk, k] = ~np.uint32(0)
+
+		for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
+			for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
+				p = patch_coordinate_y * (self.dim[0] - self.patch_dim[0] + 1) + patch_coordinate_x
+				p_chunk = p // 32
+				p_pos = p % 32
+
+				for y_threshold in range(self.dim[1] - self.patch_dim[1]):
+					patch_pos = y_threshold
+					if patch_coordinate_y > y_threshold:
+						encoded_X_packed[p_chunk, patch_pos] |= 1 << p_pos
+
+						if self.append_negated:
+							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(
+								1 << p_pos
+							)
+
+				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
+					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
+					if patch_coordinate_x > x_threshold:
+						encoded_X_packed[p_chunk, patch_pos] |= 1 << p_pos
+
+						if self.append_negated:
+							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(
+								1 << p_pos
+							)
+
+		self.endoded_X_packed_base = encoded_X_packed.reshape(-1)
+		self.encoded_X_packed_gpu = mem_alloc(self.endoded_X_packed_base.nbytes)
+		memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
+
+	def _init_fit(self):
+		if self.append_negated:
+			self.number_of_features = (
+				int(
+					self.patch_dim[0] * self.patch_dim[1] * self.dim[2]
+					+ (self.dim[0] - self.patch_dim[0])
+					+ (self.dim[1] - self.patch_dim[1])
+				)
+				* 2
+			)
+		else:
+			self.number_of_features = int(
+				self.patch_dim[0] * self.patch_dim[1] * self.dim[2]
+				+ (self.dim[0] - self.patch_dim[0])
+				+ (self.dim[1] - self.patch_dim[1])
+			)
+
+		if self.max_included_literals is None:
+			self.max_included_literals = self.number_of_features
+
+		self.number_of_patches = int((self.dim[0] - self.patch_dim[0] + 1) * (self.dim[1] - self.patch_dim[1] + 1))
+		self.number_of_ta_chunks = int((self.number_of_features - 1) / 32 + 1)
+
+	#### CAUSE and WEIGHT OPERATIONS ####
 	def ta_action(self, clause, ta):
 		if np.array_equal(self.ta_state, np.array([])):
 			self.ta_state = np.empty(
@@ -158,150 +490,6 @@ class CommonTsetlinMachine:
 				self.dim[1] - self.patch_dim[1] + 1,
 			)
 		)
-
-	def get_state(self):
-		self.ta_state = np.empty(
-			self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits,
-			dtype=np.uint32,
-		)
-		self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
-		self.patch_weights = np.empty(
-			self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
-		)
-		memcpy_dtoh(self.ta_state, self.ta_state_gpu)
-		memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
-		memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
-
-		return (
-			self.ta_state,
-			self.clause_weights,
-			self.number_of_outputs,
-			self.number_of_clauses,
-			self.number_of_features,
-			self.dim,
-			self.patch_dim,
-			self.number_of_patches,
-			self.number_of_state_bits,
-			self.number_of_ta_chunks,
-			self.append_negated,
-			self.min_y,
-			self.max_y,
-			self.patch_weights,
-		)
-
-	def set_state(self, state):
-		self.number_of_outputs = state[2]
-		self.number_of_clauses = state[3]
-		self.number_of_features = state[4]
-		self.dim = state[5]
-		self.patch_dim = state[6]
-		self.number_of_patches = state[7]
-		self.number_of_state_bits = state[8]
-		self.number_of_ta_chunks = state[9]
-		self.append_negated = state[10]
-		self.min_y = state[11]
-		self.max_y = state[12]
-
-		self._init_fit()
-		self.init_gpu()
-		memcpy_htod(self.ta_state_gpu, state[0])
-		memcpy_htod(self.clause_weights_gpu, state[1])
-		memcpy_htod(self.patch_weights_gpu, state[13])
-		self._init_encoded_X()
-		self.initialized = True
-
-		self.X_train = np.array([])
-		self.X_test = np.array([])
-
-		self.encoded_Y = np.array([])
-
-		self.ta_state = np.array([])
-		self.clause_weights = np.array([])
-		self.patch_weights = np.array([])
-
-	def save(self, fname=""):
-		# Copy data from GPU to CPU
-		if np.array_equal(self.ta_state, np.array([])):
-			self.ta_state = np.empty(
-				self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits,
-				dtype=np.uint32,
-			)
-			memcpy_dtoh(self.ta_state, self.ta_state_gpu)
-
-		if np.array_equal(self.clause_weights, np.array([])):
-			self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
-			memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
-
-		if np.array_equal(self.clause_weights, np.array([])):
-			self.patch_weights = np.empty(
-				self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
-			)
-			memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
-
-		state_dict = {
-			# State arrays
-			"ta_state": self.ta_state,
-			"clause_weights": self.clause_weights,
-			"patch_weights": self.patch_weights,
-			"number_of_outputs": self.number_of_outputs,
-			"number_of_features": self.number_of_features,
-			"min_y": self.min_y,
-			"max_y": self.max_y,
-			"negative_clauses": self.negative_clauses,  # Set in children classes, should be set in this class.
-			# Parameters
-			"number_of_clauses": self.number_of_clauses,
-			"T": self.T,
-			"s": self.s,
-			"q": self.q,
-			"patch_dim": self.patch_dim,
-			"r": self.r,
-			"sr": self.sr,
-			"dim": self.dim,
-			"max_included_literals": self.max_included_literals,
-			"boost_true_positive_feedback": self.boost_true_positive_feedback,
-			"number_of_state_bits": self.number_of_state_bits,
-			"append_negated": self.append_negated,
-		}
-
-		# Save to file
-		if len(fname) > 0:
-			print(f"Saving model to {fname}.")
-			with open(fname, "wb") as f:
-				pickle.dump(state_dict, f)
-
-		return state_dict
-
-	def load(self, state_dict={}, fname=""):
-		if len(fname) == 0 and len(state_dict) == 0:
-			print("Error: No file or state_dict provided. Pass either a file name or a state_dict.")
-			return
-
-		# Load from file
-		if len(fname) > 0:
-			print(f"Loading model from {fname}.")
-			with open(fname, "rb") as f:
-				state_dict = pickle.load(f)
-
-		# Load arrays state_dict
-		self.ta_state = state_dict["ta_state"]
-		self.clause_weights = state_dict["clause_weights"]
-		self.patch_weights = state_dict["patch_weights"]
-		self.number_of_outputs = state_dict["number_of_outputs"]
-		self.dim = state_dict["dim"]
-		self.patch_dim = state_dict["patch_dim"]
-		self.min_y = state_dict["min_y"]
-		self.max_y = state_dict["max_y"]
-		self.negative_clauses = state_dict["negative_clauses"]
-
-		self._init_fit()
-		self.init_gpu()
-		self._init_encoded_X()
-
-		memcpy_htod(self.ta_state_gpu, self.ta_state)
-		memcpy_htod(self.clause_weights_gpu, self.clause_weights)
-		memcpy_htod(self.patch_weights_gpu, self.patch_weights)
-
-		self.initialized = True
 
 	# Transform input data for processing at next layer
 	def transform(self, X) -> csr_matrix:
@@ -436,338 +624,153 @@ class CommonTsetlinMachine:
 		# NOTE: RETURNS CSR_MATRIX
 		return csr_matrix(X_transformed.reshape((number_of_examples, self.number_of_clauses * self.number_of_patches)))
 
-	def init_gpu(self):
-		self._init_gpu_code()
-		self.allocate_gpu_memory()
-
-	def _init_gpu_code(self):
-		# Encode and pack input
-		mod_encode = SourceModule(kernels.code_encode, no_extern_c=True)
-		self.encode = mod_encode.get_function("encode")
-		self.encode.prepare("PPPiiiiiiii")
-
-		self.encode_packed = mod_encode.get_function("encode_packed")
-		self.encode_packed.prepare("PPPiiiiiiii")
-
-		self.produce_autoencoder_examples = mod_encode.get_function("produce_autoencoder_example")
-		self.produce_autoencoder_examples.prepare("PPiPPiPPiPPiiii")
-
-		parameters = f"""
-		#define CLAUSES {self.number_of_clauses}
-		#define THRESH {self.T}
-		#define S {self.s}
-		#define Q {self.q}
-		#define STATE_BITS {self.number_of_state_bits}
-		#define BOOST_TRUE_POSITIVE_FEEDBACK {self.boost_true_positive_feedback}
-		#define MAX_INCLUDED_LITERALS {self.max_included_literals}
-		#define NEGATIVE_CLAUSES {self.negative_clauses}
-		#define RESISTANCE {self.r}
-		#define SR {self.sr}
-		#define CLASSES {self.number_of_outputs}
-		#define FEATURES {self.number_of_features}
-		#define PATCHES {self.number_of_patches}
-		#define MAX_STATE {(1 << self.number_of_state_bits) - 1}
-		"""
-
-		# Prepare
-		mod_prepare = SourceModule(parameters + kernels.code_header + kernels.code_prepare, no_extern_c=True)
-		self.prepare = mod_prepare.get_function("prepare")
-		self.prepare_packed = mod_prepare.get_function("prepare_packed")
-
-		# Update
-		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
-		self.update = mod_update.get_function("update")
-		self.update.prepare("PPPPPPPPPi")
-
-		self.evaluate_update = mod_update.get_function("evaluate")
-		self.evaluate_update.prepare("PPPPPPP")
-
-		# Evaluate
-		mod_evaluate = SourceModule(parameters + kernels.code_header + kernels.code_evaluate, no_extern_c=True)
-		self.evaluate = mod_evaluate.get_function("evaluate")
-		self.evaluate.prepare("PPPP")
-
-		self.evaluate_packed = mod_evaluate.get_function("evaluate_packed")
-		self.evaluate_packed.prepare("PPPPPPP")
-
-		# Transform
-		mod_transform = SourceModule(parameters + kernels.code_header + kernels.code_transform, no_extern_c=True)
-		self.transform_gpu = mod_transform.get_function("transform")
-		self.transform_gpu.prepare("PPPP")
-
-		self.transform_patchwise_gpu = mod_transform.get_function("transform_patchwise")
-		self.transform_patchwise_gpu.prepare("PPPP")
-
-		# Misc Clause operations
-		mod_clauses = SourceModule(parameters + kernels.code_header + kernels.code_clauses, no_extern_c=True)
-		self.get_literals_gpu = mod_clauses.get_function("get_literals")
-		self.get_literals_gpu.prepare("PP")
-
-		self.get_ta_states_gpu = mod_clauses.get_function("get_ta_states")
-		self.get_ta_states_gpu.prepare("PP")
-
-	def _init_fit(self):
-		if self.append_negated:
-			self.number_of_features = (
-				int(
-					self.patch_dim[0] * self.patch_dim[1] * self.dim[2]
-					+ (self.dim[0] - self.patch_dim[0])
-					+ (self.dim[1] - self.patch_dim[1])
-				)
-				* 2
+	#### SAVE AND LOAD ####
+	def save(self, fname=""):
+		# Copy data from GPU to CPU
+		if np.array_equal(self.ta_state, np.array([])):
+			self.ta_state = np.empty(
+				self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits,
+				dtype=np.uint32,
 			)
-		else:
-			self.number_of_features = int(
-				self.patch_dim[0] * self.patch_dim[1] * self.dim[2]
-				+ (self.dim[0] - self.patch_dim[0])
-				+ (self.dim[1] - self.patch_dim[1])
+			memcpy_dtoh(self.ta_state, self.ta_state_gpu)
+
+		if np.array_equal(self.clause_weights, np.array([])):
+			self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
+			memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
+
+		if np.array_equal(self.clause_weights, np.array([])):
+			self.patch_weights = np.empty(
+				self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
 			)
+			memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
-		if self.max_included_literals is None:
-			self.max_included_literals = self.number_of_features
+		state_dict = {
+			# State arrays
+			"ta_state": self.ta_state,
+			"clause_weights": self.clause_weights,
+			"patch_weights": self.patch_weights,
+			"number_of_outputs": self.number_of_outputs,
+			"number_of_features": self.number_of_features,
+			"min_y": self.min_y,
+			"max_y": self.max_y,
+			"negative_clauses": self.negative_clauses,  # Set in children classes, should be set in this class.
+			# Parameters
+			"number_of_clauses": self.number_of_clauses,
+			"T": self.T,
+			"s": self.s,
+			"q": self.q,
+			"patch_dim": self.patch_dim,
+			"r": self.r,
+			"sr": self.sr,
+			"dim": self.dim,
+			"max_included_literals": self.max_included_literals,
+			"boost_true_positive_feedback": self.boost_true_positive_feedback,
+			"number_of_state_bits": self.number_of_state_bits,
+			"append_negated": self.append_negated,
+		}
 
-		self.number_of_patches = int((self.dim[0] - self.patch_dim[0] + 1) * (self.dim[1] - self.patch_dim[1] + 1))
-		self.number_of_ta_chunks = int((self.number_of_features - 1) / 32 + 1)
+		# Save to file
+		if len(fname) > 0:
+			print(f"Saving model to {fname}.")
+			with open(fname, "wb") as f:
+				pickle.dump(state_dict, f)
 
-	def _init_encoded_X(self):
-		encoded_X = np.zeros((self.number_of_patches, self.number_of_ta_chunks), dtype=np.uint32)
-		for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
-			for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
-				p = patch_coordinate_y * (self.dim[0] - self.patch_dim[0] + 1) + patch_coordinate_x
+		return state_dict
 
-				if self.append_negated:
-					for k in range(self.number_of_features // 2, self.number_of_features):
-						chunk = k // 32
-						pos = k % 32
-						encoded_X[p, chunk] |= 1 << pos
+	def load(self, state_dict={}, fname=""):
+		if len(fname) == 0 and len(state_dict) == 0:
+			print("Error: No file or state_dict provided. Pass either a file name or a state_dict.")
+			return
 
-				for y_threshold in range(self.dim[1] - self.patch_dim[1]):
-					patch_pos = y_threshold
-					if patch_coordinate_y > y_threshold:
-						chunk = patch_pos // 32
-						pos = patch_pos % 32
-						encoded_X[p, chunk] |= 1 << pos
+		# Load from file
+		if len(fname) > 0:
+			print(f"Loading model from {fname}.")
+			with open(fname, "rb") as f:
+				state_dict = pickle.load(f)
 
-						if self.append_negated:
-							chunk = (patch_pos + self.number_of_features // 2) // 32
-							pos = (patch_pos + self.number_of_features // 2) % 32
-							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
+		# Load arrays state_dict
+		self.ta_state = state_dict["ta_state"]
+		self.clause_weights = state_dict["clause_weights"]
+		self.patch_weights = state_dict["patch_weights"]
+		self.number_of_outputs = state_dict["number_of_outputs"]
+		self.dim = state_dict["dim"]
+		self.patch_dim = state_dict["patch_dim"]
+		self.min_y = state_dict["min_y"]
+		self.max_y = state_dict["max_y"]
+		self.negative_clauses = state_dict["negative_clauses"]
 
-				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
-					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
-					if patch_coordinate_x > x_threshold:
-						chunk = patch_pos // 32
-						pos = patch_pos % 32
-						encoded_X[p, chunk] |= 1 << pos
+		self._init_fit()
+		self._init_kernels()
+		self._init_encoded_X()
 
-						if self.append_negated:
-							chunk = (patch_pos + self.number_of_features // 2) // 32
-							pos = (patch_pos + self.number_of_features // 2) % 32
-							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
+		memcpy_htod(self.ta_state_gpu, self.ta_state)
+		memcpy_htod(self.clause_weights_gpu, self.clause_weights)
+		memcpy_htod(self.patch_weights_gpu, self.patch_weights)
 
-		self.encoded_X_base = encoded_X.reshape(-1)
-		self.encoded_X_gpu = mem_alloc(self.encoded_X_base.nbytes)
-		memcpy_htod(self.encoded_X_gpu, self.encoded_X_base)
+		self.initialized = True
 
-		# Encoded X packed
-		encoded_X_packed = np.zeros(((self.number_of_patches - 1) // 32 + 1, self.number_of_features), dtype=np.uint32)
-		if self.append_negated:
-			for p_chunk in range((self.number_of_patches - 1) // 32 + 1):
-				for k in range(self.number_of_features // 2, self.number_of_features):
-					encoded_X_packed[p_chunk, k] = ~np.uint32(0)
+	####################
 
-		for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
-			for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
-				p = patch_coordinate_y * (self.dim[0] - self.patch_dim[0] + 1) + patch_coordinate_x
-				p_chunk = p // 32
-				p_pos = p % 32
-
-				for y_threshold in range(self.dim[1] - self.patch_dim[1]):
-					patch_pos = y_threshold
-					if patch_coordinate_y > y_threshold:
-						encoded_X_packed[p_chunk, patch_pos] |= 1 << p_pos
-
-						if self.append_negated:
-							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(
-								1 << p_pos
-							)
-
-				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
-					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
-					if patch_coordinate_x > x_threshold:
-						encoded_X_packed[p_chunk, patch_pos] |= 1 << p_pos
-
-						if self.append_negated:
-							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(
-								1 << p_pos
-							)
-
-		self.endoded_X_packed_base = encoded_X_packed.reshape(-1)
-		self.encoded_X_packed_gpu = mem_alloc(self.endoded_X_packed_base.nbytes)
-		memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
-
-	def reset(self):
-		self.prepare(
-			g.state,
-			self.ta_state_gpu,
-			self.clause_weights_gpu,
-			self.class_sum_gpu,
-			grid=self.grid,
-			block=self.block,
+	#### DEPRECATED ####
+	def get_state(self):
+		self.ta_state = np.empty(
+			self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits,
+			dtype=np.uint32,
 		)
-		ctx.synchronize()
+		self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
+		self.patch_weights = np.empty(
+			self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
+		)
+		memcpy_dtoh(self.ta_state, self.ta_state_gpu)
+		memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
+		memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
-	def _fit(self, X, encoded_Y, epochs=1, incremental=True):
-		# Initialize fit
-		if not self.initialized:
-			self._init_fit()
-			self.init_gpu()
-			self._init_encoded_X()
-			self.reset()
-			self.initialized = True
+		return (
+			self.ta_state,
+			self.clause_weights,
+			self.number_of_outputs,
+			self.number_of_clauses,
+			self.number_of_features,
+			self.dim,
+			self.patch_dim,
+			self.number_of_patches,
+			self.number_of_state_bits,
+			self.number_of_ta_chunks,
+			self.append_negated,
+			self.min_y,
+			self.max_y,
+			self.patch_weights,
+		)
 
-		# If not incremental, clear ta-state and clause_weghts
-		elif not incremental:
-			self.reset()
+	def set_state(self, state):
+		self.number_of_outputs = state[2]
+		self.number_of_clauses = state[3]
+		self.number_of_features = state[4]
+		self.dim = state[5]
+		self.patch_dim = state[6]
+		self.number_of_patches = state[7]
+		self.number_of_state_bits = state[8]
+		self.number_of_ta_chunks = state[9]
+		self.append_negated = state[10]
+		self.min_y = state[11]
+		self.max_y = state[12]
 
-		# Copy data to Gpu
-		if not np.array_equal(self.X_train, np.concatenate((X.indptr, X.indices))):
-			self.X_train = np.concatenate((X.indptr, X.indices))
-			self.X_train_indptr_gpu = mem_alloc(X.indptr.nbytes)
-			memcpy_htod(self.X_train_indptr_gpu, X.indptr)
+		self._init_fit()
+		self._init_kernels()
+		memcpy_htod(self.ta_state_gpu, state[0])
+		memcpy_htod(self.clause_weights_gpu, state[1])
+		memcpy_htod(self.patch_weights_gpu, state[13])
+		self._init_encoded_X()
+		self.initialized = True
 
-			self.X_train_indices_gpu = mem_alloc(X.indices.nbytes)
-			memcpy_htod(self.X_train_indices_gpu, X.indices)
+		self.X_train = np.array([])
+		self.X_test = np.array([])
 
-		if not np.array_equal(self.encoded_Y, encoded_Y):
-			self.encoded_Y = encoded_Y
-			self.encoded_Y_gpu = mem_alloc(encoded_Y.nbytes)
-			memcpy_htod(self.encoded_Y_gpu, encoded_Y)
-
-		class_sum = np.zeros(self.number_of_outputs).astype(np.int32)
-		for epoch in range(epochs):
-			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
-				memcpy_htod(self.class_sum_gpu, class_sum)
-				memcpy_htod(self.encoded_X_gpu, self.encoded_X_base)
-
-				self.encode.prepared_call(
-					self.grid,
-					self.block,
-					self.X_train_indptr_gpu,
-					self.X_train_indices_gpu,
-					self.encoded_X_gpu,
-					np.int32(e),
-					np.int32(self.dim[0]),
-					np.int32(self.dim[1]),
-					np.int32(self.dim[2]),
-					np.int32(self.patch_dim[0]),
-					np.int32(self.patch_dim[1]),
-					np.int32(self.append_negated),
-					np.int32(0),
-				)
-				ctx.synchronize()
-
-				self.evaluate_update.prepared_call(
-					self.grid,
-					self.block,
-					g.state,
-					self.ta_state_gpu,
-					self.clause_weights_gpu,
-					self.class_sum_gpu,
-					self.clause_outputs_gpu,
-					self.clause_patches_gpu,
-					self.encoded_X_gpu,
-				)
-				ctx.synchronize()
-
-				self.update.prepared_call(
-					self.grid,
-					self.block,
-					g.state,
-					self.ta_state_gpu,
-					self.clause_weights_gpu,
-					self.patch_weights_gpu,
-					self.class_sum_gpu,
-					self.clause_outputs_gpu,
-					self.clause_patches_gpu,
-					self.encoded_X_gpu,
-					self.encoded_Y_gpu,
-					np.int32(e),
-				)
-				ctx.synchronize()
+		self.encoded_Y = np.array([])
 
 		self.ta_state = np.array([])
 		self.clause_weights = np.array([])
-
-		return
-
-	def predict(self, X, return_class_sums=False):
-		raise NotImplementedError
-
-	def _score(self, X):
-		if not self.initialized:
-			print("Error: Model not trained.")
-			sys.exit(-1)
-
-		if not np.array_equal(self.X_test, np.concatenate((X.indptr, X.indices))):
-			self.X_test = np.concatenate((X.indptr, X.indices))
-
-			self.X_test_indptr_gpu = mem_alloc(X.indptr.nbytes)
-			memcpy_htod(self.X_test_indptr_gpu, X.indptr)
-
-			self.X_test_indices_gpu = mem_alloc(X.indices.nbytes)
-			memcpy_htod(self.X_test_indices_gpu, X.indices)
-
-		self.prepare_packed(
-			g.state,
-			self.ta_state_gpu,
-			self.included_literals_gpu,
-			self.included_literals_length_gpu,
-			self.excluded_literals_gpu,
-			self.excluded_literals_length_gpu,
-			grid=self.grid,
-			block=self.block,
-		)
-		ctx.synchronize()
-
-		class_sum = np.zeros((X.shape[0], self.number_of_outputs), dtype=np.int32)
-		for e in tqdm(range(X.shape[0]), leave=False, desc="Predict"):
-			memcpy_htod(self.class_sum_gpu, class_sum[e, :])
-			memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
-
-			self.encode_packed.prepared_call(
-				self.grid,
-				self.block,
-				self.X_test_indptr_gpu,
-				self.X_test_indices_gpu,
-				self.encoded_X_packed_gpu,
-				np.int32(e),
-				np.int32(self.dim[0]),
-				np.int32(self.dim[1]),
-				np.int32(self.dim[2]),
-				np.int32(self.patch_dim[0]),
-				np.int32(self.patch_dim[1]),
-				np.int32(self.append_negated),
-				np.int32(0),
-			)
-			ctx.synchronize()
-
-			self.evaluate_packed.prepared_call(
-				self.grid,
-				self.block,
-				self.included_literals_gpu,
-				self.included_literals_length_gpu,
-				self.excluded_literals_gpu,
-				self.excluded_literals_length_gpu,
-				self.clause_weights_gpu,
-				self.class_sum_gpu,
-				self.encoded_X_packed_gpu,
-			)
-			ctx.synchronize()
-
-			memcpy_dtoh(class_sum[e, :], self.class_sum_gpu)
-
-		return class_sum
+		self.patch_weights = np.array([])
 
 
 class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
