@@ -6,12 +6,8 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
 
     curandState localState = state[index];
 
-    for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
-        int group_id = combined_clause_id / CLAUSES;
-        int clause = combined_clause_id % CLAUSES;
-
-        unsigned int *ta_state =
-            &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
+    for (int clause = index; clause < CLAUSES; clause += stride) {
+        unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
 
         for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
             for (int b = 0; b < STATE_BITS - 1; ++b) {
@@ -45,21 +41,17 @@ __global__ void prepare_packed(curandState *state, unsigned int *global_ta_state
 
     curandState localState = state[index];
 
-    for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
-        int group_id = combined_clause_id / CLAUSES;
-        int clause = combined_clause_id % CLAUSES;
-        unsigned int *ta_state =
-            &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
+    for (int clause = index; clause < CLAUSES; clause += stride) {
+        unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
 
-        included_literals_length[group_id * CLAUSES + clause] = 0;
+        included_literals_length[clause] = 0;
         for (int literal = 0; literal < FEATURES; ++literal) {
             int chunk = literal / INT_SIZE;
             int pos = literal % INT_SIZE;
 
             if ((ta_state[chunk * STATE_BITS + STATE_BITS - 1] & (1U << pos)) > 0) {
-                included_literals[group_id * CLAUSES * FEATURES * 2 + clause * FEATURES * 2 +
-                                  included_literals_length[group_id * CLAUSES + clause] * 2] = literal;
-                included_literals_length[group_id * CLAUSES + clause]++;
+                included_literals[clause * FEATURES * 2 + included_literals_length[clause] * 2] = literal;
+                included_literals_length[clause]++;
             }
         }
     }

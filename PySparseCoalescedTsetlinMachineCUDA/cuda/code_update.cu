@@ -105,19 +105,18 @@ __device__ inline void calculate_clause_output(curandState *localState, unsigned
     }
 }
 
-__device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state, int thresh,
-                                     float s, float sr, float q, int clause_output, int clause_patch, int *X, int y,
-                                     int class_sum) {
+__device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state,
+                                     int clause_output, int clause_patch, int *X, int y, int class_sum) {
     int target = 1 - 2 * (class_sum > y);
 
-    if (target == -1 && curand_uniform(localState) > 1.0 * q / max(1, CLASSES - 1)) {
+    if (target == -1 && curand_uniform(localState) > 1.0 * Q / max(1, CLASSES - 1)) {
         return;
     }
 
     int sign = (*clause_weight >= 0) - (*clause_weight < 0);
 
     int absolute_prediction_error = abs(y - class_sum);
-    if (curand_uniform(localState) <= 1.0 * absolute_prediction_error / (2 * thresh)) {
+    if (curand_uniform(localState) <= 1.0 * absolute_prediction_error / (2 * THRESH)) {
         if (target * sign > 0) {
             int included_literals = number_of_include_actions(ta_state);
 
@@ -132,7 +131,7 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
                 if (clause_output && included_literals <= MAX_INCLUDED_LITERALS) {
                     unsigned int la_feedback = 0;
                     for (int b = 0; b < INT_SIZE; ++b) {
-                        if (curand_uniform(localState) <= 1.0 / s) {
+                        if (curand_uniform(localState) <= 1.0 / S) {
                             la_feedback |= (1 << b);
                         }
                     }
@@ -149,17 +148,14 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
                     int la_feedback = 0;
 
                     for (int b = 0; b < INT_SIZE; ++b) {
-                        if (sr != s && (ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & (1 << b))) {
+                        if (SR != S && (ta_state[la_chunk * STATE_BITS + STATE_BITS - 1] & (1 << b))) {
                             unsigned int cur_state = get_state(ta_state, 0, la_chunk, b);
-                            float t1 = (sr - s) / (sr);
+                            float t1 = (SR - S) / (SR);
                             float t2 = (2.0 * (float)cur_state - (float)MAX_STATE) / ((float)MAX_STATE + 2.0);
-                            float mod = 1 - (t1 * pow(t2, 1 / R));
-                            // if (cur_state >= 250)
-                            //     printf("t1 = %f, t2 = %f, mod: %f, 1/s = %f, new 1/s: %f, state: %d\n", t1, t2, mod,
-                            //            1 / s, mod / s, cur_state);
-                            if (curand_uniform(localState) <= mod / s) la_feedback |= (1 << b);
+                            float mod = 1 - (t1 * pow(t2, 1 / RESISTANCE));
+                            if (curand_uniform(localState) <= mod / S) la_feedback |= (1 << b);
                         } else {
-                            if (curand_uniform(localState) <= 1.0 / s) la_feedback |= (1 << b);
+                            if (curand_uniform(localState) <= 1.0 / S) la_feedback |= (1 << b);
                         }
                     }
                     dec(ta_state, 0, la_chunk, la_feedback);
@@ -192,11 +188,8 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
         class_sum[i] = 0;
     }
 
-    for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
-        int group_id = combined_clause_id / CLAUSES;
-        int clause = combined_clause_id % CLAUSES;
-        unsigned int *ta_state =
-            &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
+    for (int clause = index; clause < CLAUSES; clause += stride) {
+        unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
 
         int clause_output;
         for (int patch = 0; patch < PATCHES; ++patch) {
@@ -221,10 +214,8 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
 
         if (clause_output) {
             for (int class_id = 0; class_id < CLASSES; ++class_id) {
-                if (group_id == GROUP_ID[class_id]) {
-                    int clause_weight = clause_weights[class_id * CLAUSES + clause];
-                    atomicAdd(&class_sum[class_id], clause_weight);
-                }
+                int clause_weight = clause_weights[class_id * CLAUSES + clause];
+                atomicAdd(&class_sum[class_id], clause_weight);
             }
         }
     }
@@ -240,37 +231,30 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
     curandState localState = state[index];
 
     // Calculate clause output first
-    for (int combined_clause_id = index; combined_clause_id < GROUPS * CLAUSES; combined_clause_id += stride) {
-        int group_id = combined_clause_id / CLAUSES;
-        int clause = combined_clause_id % CLAUSES;
-        unsigned int *ta_state =
-            &global_ta_state[group_id * CLAUSES * LA_CHUNKS * STATE_BITS + clause * LA_CHUNKS * STATE_BITS];
+    for (int clause = index; clause < CLAUSES; clause += stride) {
+        unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
 
         unsigned int clause_output;
         int clause_patch;
         calculate_clause_output(&localState, ta_state, &clause_output, &clause_patch, X);
 
         for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id) {
-            if (group_id == GROUP_ID[class_id]) {
-                int local_class_sum = class_sum[class_id];
-                if (local_class_sum > T[class_id]) {
-                    local_class_sum = T[class_id];
-                } else if (local_class_sum < -T[class_id]) {
-                    local_class_sum = -T[class_id];
-                }
-                int enc_y = y[example * CLASSES + class_id];
-                if (enc_y > 0)
-                    enc_y = T[class_id];
-                else
-                    enc_y = -T[class_id];
-
-                if (clause_patch >= 0)
-                    patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
-
-                update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, T[class_id],
-                              S[class_id], SR[class_id], Q[class_id], clause_output, clause_patch, X, enc_y,
-                              local_class_sum);
+            int local_class_sum = class_sum[class_id];
+            if (local_class_sum > THRESH) {
+                local_class_sum = THRESH;
+            } else if (local_class_sum < -THRESH) {
+                local_class_sum = -THRESH;
             }
+            int enc_y = y[example * CLASSES + class_id];
+            if (enc_y > 0)
+                enc_y = THRESH;
+            else
+                enc_y = -THRESH;
+
+            if (clause_patch >= 0) patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patch] += 1;
+
+            update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_output,
+                          clause_patch, X, enc_y, local_class_sum);
         }
     }
 
