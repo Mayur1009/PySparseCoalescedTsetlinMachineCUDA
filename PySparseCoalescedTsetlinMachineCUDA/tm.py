@@ -88,6 +88,9 @@ class CommonTsetlinMachine:
 		self.class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
 		self.patch_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * self.number_of_patches * 4)
 
+		self.clause_outputs_gpu = mem_alloc(self.number_of_clauses * 4)
+		self.clause_patches_gpu = mem_alloc(self.number_of_clauses * 4)
+
 		# Contains index and state of included literals per clause, none at start
 		self.included_literals_gpu = mem_alloc(self.number_of_clauses * self.number_of_features * 2 * 4)
 		# Number of included literals per clause
@@ -474,10 +477,10 @@ class CommonTsetlinMachine:
 		# Update
 		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
 		self.update = mod_update.get_function("update")
-		self.update.prepare("PPPPPPPi")
+		self.update.prepare("PPPPPPPPPi")
 
 		self.evaluate_update = mod_update.get_function("evaluate")
-		self.evaluate_update.prepare("PPPP")
+		self.evaluate_update.prepare("PPPPPPP")
 
 		# Evaluate
 		mod_evaluate = SourceModule(parameters + kernels.code_header + kernels.code_evaluate, no_extern_c=True)
@@ -667,9 +670,12 @@ class CommonTsetlinMachine:
 				self.evaluate_update.prepared_call(
 					self.grid,
 					self.block,
+					g.state,
 					self.ta_state_gpu,
 					self.clause_weights_gpu,
 					self.class_sum_gpu,
+					self.clause_outputs_gpu,
+					self.clause_patches_gpu,
 					self.encoded_X_gpu,
 				)
 				ctx.synchronize()
@@ -682,6 +688,8 @@ class CommonTsetlinMachine:
 					self.clause_weights_gpu,
 					self.patch_weights_gpu,
 					self.class_sum_gpu,
+					self.clause_outputs_gpu,
+					self.clause_patches_gpu,
 					self.encoded_X_gpu,
 					self.encoded_Y_gpu,
 					np.int32(e),
