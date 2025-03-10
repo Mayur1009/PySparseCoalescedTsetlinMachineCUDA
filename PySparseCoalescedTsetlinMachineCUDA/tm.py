@@ -606,12 +606,6 @@ class CommonTsetlinMachine:
 		self.evaluate_update = mod_update.get_function("evaluate")
 		self.evaluate_update.prepare("PPPPPPP")
 
-		self.sync_ta_states = mod_update.get_function("sync_ta_states")
-		self.sync_ta_states.prepare("PP")
-
-		self.sync_weights = mod_update.get_function("sync_weights")
-		self.sync_weights.prepare("PP")
-
 		# Evaluate
 		mod_evaluate = SourceModule(parameters + kernels.code_header + kernels.code_evaluate, no_extern_c=True)
 		self.evaluate = mod_evaluate.get_function("evaluate")
@@ -804,27 +798,29 @@ class CommonTsetlinMachine:
 			self.encoded_Y_gpu = mem_alloc(encoded_Y.nbytes)
 			memcpy_htod(self.encoded_Y_gpu, encoded_Y)
 
-		class_sum = np.zeros(self.number_of_outputs, dtype=np.int32)
+		if mini_batches == 0:
+			batches = np.array([[i] for i in range(X.shape[0])], dtype=np.uint32)
+			mini_batches = X.shape[0]
+
+		else:
+			batches = self._create_batches(encoded_Y, mini_batches, num_samples_per_class)
+
+		num_indices_per_batch = batches.shape[1]
+
+		zero_class_sum = np.zeros(self.number_of_outputs, dtype=np.int32)
+		encoded_X_batches = [mem_alloc(self.encoded_X_base.nbytes) for _ in range(num_indices_per_batch)]
+		class_sum_batches = [mem_alloc(zero_class_sum.nbytes) for _ in range(num_indices_per_batch)]
+		clause_outputs_batches = [mem_alloc(self.number_of_clauses * 4) for _ in range(num_indices_per_batch)]
+		clause_patches_batches = [mem_alloc(self.number_of_clauses * 4) for _ in range(num_indices_per_batch)]
+
 		for _ in range(epochs):
-			if mini_batches == 0:
-				batches = np.array([[i] for i in range(X.shape[0])], dtype=np.uint32)
-				mini_batches = X.shape[0]
-
-			else:
-				batches = self._create_batches(encoded_Y, mini_batches, num_samples_per_class)
-
 			for batch_ind in tqdm(range(mini_batches), leave=False, desc="Fit Batch"):
-				encoded_X_batches = [mem_alloc(self.encoded_X_base.nbytes) for _ in range(len(batches[batch_ind]))]
-				class_sum_batches = [mem_alloc(class_sum.nbytes) for _ in range(len(batches[batch_ind]))]
-				clause_outputs_batches = [mem_alloc(self.number_of_clauses * 4) for _ in range(len(batches[batch_ind]))]
-				clause_patches_batches = [mem_alloc(self.number_of_clauses * 4) for _ in range(len(batches[batch_ind]))]
-
 				for i, e in enumerate(batches[batch_ind]):
 					# Reset encoded_X_gpu
 					memcpy_htod(encoded_X_batches[i], self.encoded_X_base)
 
 					# Reset class_sum_gpu
-					memcpy_htod(class_sum_batches[i], class_sum)
+					memcpy_htod(class_sum_batches[i], zero_class_sum)
 
 					self.encode.prepared_call(
 						(min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1),
@@ -1019,7 +1015,14 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		for i in range(self.number_of_outputs):
 			encoded_Y[:, i] = np.where(Y == i, 1, 0)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
+		self._fit(
+			X,
+			encoded_Y,
+			epochs=epochs,
+			incremental=incremental,
+			mini_batches=mini_batches,
+			num_samples_per_class=num_samples_per_class,
+		)
 
 	def score(self, X):
 		X = csr_matrix(X)
@@ -1088,7 +1091,14 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
+		self._fit(
+			X,
+			encoded_Y,
+			epochs=epochs,
+			incremental=incremental,
+			mini_batches=mini_batches,
+			num_samples_per_class=num_samples_per_class,
+		)
 
 	def score(self, X):
 		X = csr_matrix(X)
@@ -1152,7 +1162,14 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		self.min_y = None
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
+		self._fit(
+			X,
+			encoded_Y,
+			epochs=epochs,
+			incremental=incremental,
+			mini_batches=mini_batches,
+			num_samples_per_class=num_samples_per_class,
+		)
 
 		return
 
@@ -1220,7 +1237,14 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		for i in range(self.number_of_outputs):
 			encoded_Y[:, i] = np.where(Y == i, 1, 0)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
+		self._fit(
+			X,
+			encoded_Y,
+			epochs=epochs,
+			incremental=incremental,
+			mini_batches=mini_batches,
+			num_samples_per_class=num_samples_per_class,
+		)
 
 		return
 
@@ -1280,7 +1304,14 @@ class TsetlinMachine(CommonTsetlinMachine):
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, mini_batches=mini_batches, num_samples_per_class=num_samples_per_class)
+		self._fit(
+			X,
+			encoded_Y,
+			epochs=epochs,
+			incremental=incremental,
+			mini_batches=mini_batches,
+			num_samples_per_class=num_samples_per_class,
+		)
 
 		return
 

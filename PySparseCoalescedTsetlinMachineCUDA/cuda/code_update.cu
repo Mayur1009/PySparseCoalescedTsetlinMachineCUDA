@@ -239,22 +239,4 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
 
     state[index] = localState;
 }
-
-__global__ void sync_ta_states(unsigned int *global_ta_state, unsigned int *batch_ta_state) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-
-    for (int i = index; i < CLAUSES * LA_CHUNKS * STATE_BITS; i += stride) {
-        global_ta_state[i] = batch_ta_state[i];
-    }
-}
-
-__global__ void sync_weights(int *global_clause_weights, int *batch_clause_weights) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-
-    for (int i = index; i < CLASSES * CLAUSES; i += stride) {
-        global_clause_weights[i] = batch_clause_weights[i];
-    }
-}
 }
