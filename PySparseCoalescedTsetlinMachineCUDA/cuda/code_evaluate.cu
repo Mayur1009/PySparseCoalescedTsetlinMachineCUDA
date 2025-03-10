@@ -56,7 +56,6 @@ __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int
 
 // Evaluate examples
 __global__ void evaluate_packed(unsigned int *included_literals, unsigned int *included_literals_length,
-                                unsigned int *excluded_literals, unsigned int *excluded_literals_length,
                                 int *clause_weights, int *class_sum, int *X) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;

@@ -110,6 +110,10 @@ class CommonTsetlinMachine:
 			self.encoded_Y_gpu = mem_alloc(encoded_Y.nbytes)
 			memcpy_htod(self.encoded_Y_gpu, encoded_Y)
 
+		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
+		grid_evaluate = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
+		grid_update = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
+
 		class_sum = np.zeros(self.number_of_outputs).astype(np.int32)
 		for epoch in range(epochs):
 			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
@@ -117,7 +121,7 @@ class CommonTsetlinMachine:
 				memcpy_htod(self.encoded_X_gpu, self.encoded_X_base)
 
 				self.encode.prepared_call(
-					self.grid,
+					grid_encode,
 					self.block,
 					self.X_train_indptr_gpu,
 					self.X_train_indices_gpu,
@@ -134,7 +138,7 @@ class CommonTsetlinMachine:
 				ctx.synchronize()
 
 				self.evaluate_update.prepared_call(
-					self.grid,
+					grid_evaluate,
 					self.block,
 					g.state,
 					self.ta_state_gpu,
@@ -147,7 +151,7 @@ class CommonTsetlinMachine:
 				ctx.synchronize()
 
 				self.update.prepared_call(
-					self.grid,
+					grid_update,
 					self.block,
 					g.state,
 					self.ta_state_gpu,
@@ -181,15 +185,16 @@ class CommonTsetlinMachine:
 			self.X_test_indices_gpu = mem_alloc(X.indices.nbytes)
 			memcpy_htod(self.X_test_indices_gpu, X.indices)
 
-		self.prepare_packed(
+		grid_prepare = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
+		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
+		grid_evaluate = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
+		self.prepare_packed.prepared_call(
+			grid_prepare,
+			self.block,
 			g.state,
 			self.ta_state_gpu,
 			self.included_literals_gpu,
 			self.included_literals_length_gpu,
-			self.excluded_literals_gpu,
-			self.excluded_literals_length_gpu,
-			grid=self.grid,
-			block=self.block,
 		)
 		ctx.synchronize()
 
@@ -199,7 +204,7 @@ class CommonTsetlinMachine:
 			memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
 
 			self.encode_packed.prepared_call(
-				self.grid,
+				grid_encode,
 				self.block,
 				self.X_test_indptr_gpu,
 				self.X_test_indices_gpu,
@@ -216,12 +221,10 @@ class CommonTsetlinMachine:
 			ctx.synchronize()
 
 			self.evaluate_packed.prepared_call(
-				self.grid,
+				grid_evaluate,
 				self.block,
 				self.included_literals_gpu,
 				self.included_literals_length_gpu,
-				self.excluded_literals_gpu,
-				self.excluded_literals_length_gpu,
 				self.clause_weights_gpu,
 				self.class_sum_gpu,
 				self.encoded_X_packed_gpu,
@@ -246,11 +249,6 @@ class CommonTsetlinMachine:
 		self.included_literals_gpu = mem_alloc(self.number_of_clauses * self.number_of_features * 2 * 4)
 		# Number of included literals per clause
 		self.included_literals_length_gpu = mem_alloc(self.number_of_clauses * 4)
-
-		# Contains index and state of excluded literals per clause
-		self.excluded_literals_gpu = mem_alloc(self.number_of_clauses * self.number_of_features * 2 * 4)
-		# Number of excluded literals per clause
-		self.excluded_literals_length_gpu = mem_alloc(self.number_of_clauses * 4)
 
 	def _init_kernels(self):
 		# Encode and pack input
@@ -284,7 +282,9 @@ class CommonTsetlinMachine:
 		# Prepare
 		mod_prepare = SourceModule(parameters + kernels.code_header + kernels.code_prepare, no_extern_c=True)
 		self.prepare = mod_prepare.get_function("prepare")
+		self.prepare.prepare("PPPP")
 		self.prepare_packed = mod_prepare.get_function("prepare_packed")
+		self.prepare_packed.prepare("PPPP")
 
 		# Update
 		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
@@ -300,7 +300,7 @@ class CommonTsetlinMachine:
 		self.evaluate.prepare("PPPP")
 
 		self.evaluate_packed = mod_evaluate.get_function("evaluate_packed")
-		self.evaluate_packed.prepare("PPPPPPP")
+		self.evaluate_packed.prepare("PPPPP")
 
 		# Transform
 		mod_transform = SourceModule(parameters + kernels.code_header + kernels.code_transform, no_extern_c=True)
@@ -322,13 +322,14 @@ class CommonTsetlinMachine:
 
 	#### STATES, WEIGHTS, AND INPUT INITIALIZATION ####
 	def _reset_states_weights(self):
-		self.prepare(
+		grid_prepare = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
+		self.prepare.prepared_call(
+			grid_prepare,
+			self.block,
 			g.state,
 			self.ta_state_gpu,
 			self.clause_weights_gpu,
 			self.class_sum_gpu,
-			grid=self.grid,
-			block=self.block,
 		)
 		ctx.synchronize()
 
@@ -510,15 +511,14 @@ class CommonTsetlinMachine:
 		X_transformed = np.empty((number_of_examples, self.number_of_clauses), dtype=np.uint32)
 		X_transformed_gpu = mem_alloc(self.number_of_clauses * 4)
 
-		self.prepare_packed(
+		grid_prepare = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
+		self.prepare_packed.prepared_call(
+			grid_prepare,
+			self.block,
 			g.state,
 			self.ta_state_gpu,
 			self.included_literals_gpu,
 			self.included_literals_length_gpu,
-			self.excluded_literals_gpu,
-			self.excluded_literals_length_gpu,
-			grid=self.grid,
-			block=self.block,
 		)
 		ctx.synchronize()
 
@@ -578,15 +578,14 @@ class CommonTsetlinMachine:
 		)
 		X_transformed_gpu = mem_alloc(self.number_of_clauses * self.number_of_patches * 4)
 
-		self.prepare_packed(
+		grid_prepare = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
+		self.prepare_packed.prepared_call(
+			grid_prepare,
+			self.block,
 			g.state,
 			self.ta_state_gpu,
 			self.included_literals_gpu,
 			self.included_literals_length_gpu,
-			self.excluded_literals_gpu,
-			self.excluded_literals_length_gpu,
-			grid=self.grid,
-			block=self.block,
 		)
 		ctx.synchronize()
 
