@@ -1,3 +1,4 @@
+#include <curand_kernel.h>
 extern "C" {
 // Evaluate examples
 __global__ void evaluate(unsigned int *global_ta_state, int *clause_weights, int *class_sum, int *X) {

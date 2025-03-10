@@ -1,3 +1,4 @@
+#include <curand_kernel.h>
 extern "C" {
 // Counts number of include actions for a given clause
 __device__ inline int number_of_include_actions(unsigned int *ta_state) {

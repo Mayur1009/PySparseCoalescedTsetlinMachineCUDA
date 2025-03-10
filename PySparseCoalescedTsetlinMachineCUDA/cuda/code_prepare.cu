@@ -1,3 +1,4 @@
+#include <curand_kernel.h>
 extern "C" {
 __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
