@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "PySparseCoalescedTsetlinMachineCUDA"
-version = "0.2.0.20"
+version = "0.2.0.21"
 dependencies = [
     "numpy",
     "pycuda",
