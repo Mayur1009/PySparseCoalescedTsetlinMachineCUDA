@@ -198,28 +198,28 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
     /* Copy state to local memory for efficiency */
     curandState localState = state[index];
 
-    // Calculate clause output first
-    for (int clause = index; clause < CLAUSES; clause += stride) {
+    for (unsigned long long clause_class = index; clause_class < CLAUSES * CLASSES; clause_class += stride) {
+        unsigned long long clause = clause_class / CLASSES;
+        unsigned long long class_id = clause_class % CLASSES;
+
         unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
-        for (unsigned long long class_id = 0; class_id < CLASSES; ++class_id) {
-            int local_class_sum = class_sum[class_id];
-            if (local_class_sum > THRESH) {
-                local_class_sum = THRESH;
-            } else if (local_class_sum < -THRESH) {
-                local_class_sum = -THRESH;
-            }
-            int enc_y = y[example * CLASSES + class_id];
-            if (enc_y > 0)
-                enc_y = THRESH;
-            else
-                enc_y = -THRESH;
-
-            if (clause_patches[clause] >= 0)
-                patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patches[clause]] += 1;
-
-            update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_outputs[clause],
-                          clause_patches[clause], X, enc_y, local_class_sum);
+        int local_class_sum = class_sum[class_id];
+        if (local_class_sum > THRESH) {
+            local_class_sum = THRESH;
+        } else if (local_class_sum < -THRESH) {
+            local_class_sum = -THRESH;
         }
+        int enc_y = y[example * CLASSES + class_id];
+        if (enc_y > 0)
+            enc_y = THRESH;
+        else
+            enc_y = -THRESH;
+
+        if (clause_patches[clause] >= 0)
+            patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patches[clause]] += 1;
+
+        update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_outputs[clause],
+                      clause_patches[clause], X, enc_y, local_class_sum);
     }
 
     state[index] = localState;
