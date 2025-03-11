@@ -392,9 +392,7 @@ class CommonTsetlinMachine:
 						encoded_X_packed[p_chunk, patch_pos] |= 1 << p_pos
 
 						if self.append_negated:
-							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(
-								1 << p_pos
-							)
+							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(1 << p_pos)
 
 				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
 					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
@@ -402,9 +400,7 @@ class CommonTsetlinMachine:
 						encoded_X_packed[p_chunk, patch_pos] |= 1 << p_pos
 
 						if self.append_negated:
-							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(
-								1 << p_pos
-							)
+							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(1 << p_pos)
 
 		self.endoded_X_packed_base = encoded_X_packed.reshape(-1)
 		self.encoded_X_packed_gpu = mem_alloc(self.endoded_X_packed_base.nbytes)
@@ -413,18 +409,11 @@ class CommonTsetlinMachine:
 	def _init_fit(self):
 		if self.append_negated:
 			self.number_of_features = (
-				int(
-					self.patch_dim[0] * self.patch_dim[1] * self.dim[2]
-					+ (self.dim[0] - self.patch_dim[0])
-					+ (self.dim[1] - self.patch_dim[1])
-				)
-				* 2
+				int(self.patch_dim[0] * self.patch_dim[1] * self.dim[2] + (self.dim[0] - self.patch_dim[0]) + (self.dim[1] - self.patch_dim[1])) * 2
 			)
 		else:
 			self.number_of_features = int(
-				self.patch_dim[0] * self.patch_dim[1] * self.dim[2]
-				+ (self.dim[0] - self.patch_dim[0])
-				+ (self.dim[1] - self.patch_dim[1])
+				self.patch_dim[0] * self.patch_dim[1] * self.dim[2] + (self.dim[0] - self.patch_dim[0]) + (self.dim[1] - self.patch_dim[1])
 			)
 
 		if self.max_included_literals is None:
@@ -436,9 +425,7 @@ class CommonTsetlinMachine:
 	#### CAUSE and WEIGHT OPERATIONS ####
 	def ta_action(self, clause, ta):
 		if np.array_equal(self.ta_state, np.array([])):
-			self.ta_state = np.empty(
-				self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits, dtype=np.uint32
-			)
+			self.ta_state = np.empty(self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits, dtype=np.uint32)
 			memcpy_dtoh(self.ta_state, self.ta_state_gpu)
 		ta_state = self.ta_state.reshape((self.number_of_clauses, self.number_of_ta_chunks, self.number_of_state_bits))
 		return (ta_state[clause, ta // 32, self.number_of_state_bits - 1] & (1 << (ta % 32))) > 0
@@ -478,9 +465,7 @@ class CommonTsetlinMachine:
 		return self.clause_weights.reshape((self.number_of_outputs, self.number_of_clauses))
 
 	def get_patch_weights(self):
-		self.patch_weights = np.empty(
-			self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
-		)
+		self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
 		memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
 		return self.patch_weights.reshape(
@@ -638,9 +623,7 @@ class CommonTsetlinMachine:
 			memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
 
 		if np.array_equal(self.clause_weights, np.array([])):
-			self.patch_weights = np.empty(
-				self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
-			)
+			self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
 			memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
 		state_dict = {
@@ -717,9 +700,7 @@ class CommonTsetlinMachine:
 			dtype=np.uint32,
 		)
 		self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
-		self.patch_weights = np.empty(
-			self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32
-		)
+		self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
 		memcpy_dtoh(self.ta_state, self.ta_state_gpu)
 		memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
 		memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
