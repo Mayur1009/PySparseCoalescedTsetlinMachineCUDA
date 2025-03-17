@@ -52,6 +52,7 @@ class CommonTsetlinMachine:
 		r: float = 1.0,
 		sr: float | None = None,
 		encode_loc: bool = True,
+		max_weight: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -71,6 +72,7 @@ class CommonTsetlinMachine:
 		else:
 			self.sr = sr
 		self.encode_loc = 1 if encode_loc else 0
+		self.max_weight = max_weight
 		self.grid = grid
 		self.block = block
 
@@ -263,6 +265,7 @@ class CommonTsetlinMachine:
 		#define PATCHES {self.number_of_patches}
 		#define MAX_STATE {(1 << self.number_of_state_bits) - 1}
 		#define ENCODE_LOC {self.encode_loc}
+		#define MAX_WEIGHT {"INT_MAX" if self.max_weight is None else self.max_weight}
 		"""
 
 		# Encode and pack input
@@ -783,6 +786,7 @@ class CommonTsetlinMachine:
 			"number_of_state_bits": self.number_of_state_bits,
 			"append_negated": self.append_negated,
 			"encode_loc": self.encode_loc,
+			"max_weight": self.max_weight,
 		}
 
 		# Save to file
@@ -907,6 +911,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		r: float = 1.0,
 		sr: float | None = None,
 		encode_loc: bool = True,
+		max_weight: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -922,6 +927,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 			r=r,
 			sr=sr,
 			encode_loc=encode_loc,
+			max_weight=max_weight,
 			grid=grid,
 			block=block,
 		)
@@ -980,6 +986,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		r: float = 1.0,
 		sr: float | None = None,
 		encode_loc: bool = True,
+		max_weight: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -995,6 +1002,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 			r=r,
 			sr=sr,
 			encode_loc=encode_loc,
+			max_weight=max_weight,
 			grid=grid,
 			block=block,
 		)
@@ -1049,6 +1057,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		append_negated=True,
 		r: float = 1.0,
 		sr: float | None = None,
+		max_weight: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1063,6 +1072,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 			append_negated=append_negated,
 			r=r,
 			sr=sr,
+			max_weight=max_weight,
 			grid=grid,
 			block=block,
 		)
@@ -1114,6 +1124,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		append_negated=True,
 		r: float = 1.0,
 		sr: float | None = None,
+		max_weight: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1128,6 +1139,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 			append_negated=append_negated,
 			r=r,
 			sr=sr,
+			max_weight=max_weight,
 			grid=grid,
 			block=block,
 		)
@@ -1178,6 +1190,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 		append_negated=True,
 		r: float = 1.0,
 		sr: float | None = None,
+		max_weight: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1192,6 +1205,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 			append_negated=append_negated,
 			r=r,
 			sr=sr,
+			max_weight=max_weight,
 			grid=grid,
 			block=block,
 		)
@@ -1238,6 +1252,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 		append_negated=True,
 		r: float = 1.0,
 		sr: float | None = None,
+		max_weight: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1251,6 +1266,7 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 			append_negated=append_negated,
 			r=r,
 			sr=sr,
+			max_weight=max_weight,
 			grid=grid,
 			block=block,
 		)
@@ -1298,6 +1314,7 @@ class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
 		append_negated=True,
 		r: float = 1.0,
 		sr: float | None = None,
+		max_weight: int | None = None,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1312,6 +1329,7 @@ class AutoEncoderTsetlinMachine(CommonTsetlinMachine):
 			append_negated=append_negated,
 			r=r,
 			sr=sr,
+			max_weight=max_weight,
 			grid=grid,
 			block=block,
 		)

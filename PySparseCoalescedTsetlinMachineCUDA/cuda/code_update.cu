@@ -81,7 +81,7 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
         if (target * sign > 0) {
             int included_literals = number_of_include_actions(ta_state);
 
-            if (clause_output && abs(*clause_weight) < INT_MAX) {
+            if (clause_output && abs(*clause_weight) < MAX_WEIGHT) {
                 (*clause_weight) += sign;
             }
 
@@ -125,7 +125,10 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
         } else if (target * sign < 0 && clause_output) {
             // Type II Feedback
 
-            (*clause_weight) -= sign;
+            if (abs(*clause_weight) < MAX_WEIGHT) {
+                (*clause_weight) -= sign;
+            }
+            // (*clause_weight) -= sign;
 #if NEGATIVE_CLAUSES == 0
             if (*clause_weight < 1) {
                 *clause_weight = 1;
