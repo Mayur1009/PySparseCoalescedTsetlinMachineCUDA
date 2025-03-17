@@ -201,7 +201,7 @@ class CommonTsetlinMachine:
 		class_sum = np.zeros((X.shape[0], self.number_of_outputs), dtype=np.int32)
 		for e in tqdm(range(X.shape[0]), leave=False, desc="Predict"):
 			memcpy_htod(self.class_sum_gpu, class_sum[e, :])
-			memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
+			memcpy_htod(self.encoded_X_packed_gpu, self.encoded_X_packed_base)
 
 			self.encode_packed.prepared_call(
 				grid_encode,
@@ -402,9 +402,9 @@ class CommonTsetlinMachine:
 						if self.append_negated:
 							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(1 << p_pos)
 
-		self.endoded_X_packed_base = encoded_X_packed.reshape(-1)
-		self.encoded_X_packed_gpu = mem_alloc(self.endoded_X_packed_base.nbytes)
-		memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
+		self.encoded_X_packed_base = encoded_X_packed.reshape(-1)
+		self.encoded_X_packed_gpu = mem_alloc(self.encoded_X_packed_base.nbytes)
+		memcpy_htod(self.encoded_X_packed_gpu, self.encoded_X_packed_base)
 
 	def _init_fit(self):
 		if self.append_negated:
@@ -508,7 +508,7 @@ class CommonTsetlinMachine:
 		ctx.synchronize()
 
 		for e in range(number_of_examples):
-			memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
+			memcpy_htod(self.encoded_X_packed_gpu, self.encoded_X_packed_base)
 			self.encode_packed.prepared_call(
 				self.grid,
 				self.block,
@@ -575,7 +575,7 @@ class CommonTsetlinMachine:
 		ctx.synchronize()
 
 		for e in range(number_of_examples):
-			memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
+			memcpy_htod(self.encoded_X_packed_gpu, self.encoded_X_packed_base)
 			self.encode_packed.prepared_call(
 				self.grid,
 				self.block,
@@ -687,7 +687,7 @@ class CommonTsetlinMachine:
 		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
 
 		for e in range(number_of_examples):
-			memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
+			memcpy_htod(self.encoded_X_packed_gpu, self.encoded_X_packed_base)
 			self.encode.prepared_call(
 				grid_encode,
 				self.block,
