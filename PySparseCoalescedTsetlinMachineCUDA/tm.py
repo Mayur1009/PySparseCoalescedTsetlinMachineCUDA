@@ -616,8 +616,8 @@ class CommonTsetlinMachine:
 		:param X: Input data
 			shape: (num_samples, dim[0] * dim[1] * dim[2])
 
-		:return: Encoded and decoded patches
-			shape: (num_samples, num_patches * num_ta_chunks)
+		:return: Patches encoded in ta_chunks
+			shape: (num_samples, num_patches, num_ta_chunks)
 		"""
 		if not self.initialized:
 			print("Error: Model not trained.")
@@ -658,31 +658,100 @@ class CommonTsetlinMachine:
 
 		return encoded_X.reshape((number_of_examples, self.number_of_patches, self.number_of_ta_chunks))
 
+	def encode_X_packed_patches(self, X):
+		"""
+		Convert X into patches and encode them in ta_chunks as TM would in normal training. Also, decode the encoded patches for sanity check.
+		The decoded patches when put together should give original X.
+
+		:param X: Input data
+			shape: (num_samples, dim[0] * dim[1] * dim[2])
+
+		:return: Literals encoded in patch_chunks
+			shape: (num_samples, num_patch_chunks, num_literals)
+		"""
+		if not self.initialized:
+			print("Error: Model not trained.")
+			sys.exit(-1)
+
+		X = csr_matrix(X)
+		number_of_examples = X.shape[0]
+
+		X_indptr_gpu = mem_alloc(X.indptr.nbytes)
+		X_indices_gpu = mem_alloc(X.indices.nbytes)
+		memcpy_htod(X_indptr_gpu, X.indptr)
+		memcpy_htod(X_indices_gpu, X.indices)
+
+		number_of_patch_chunks = (self.number_of_patches - 1) // 32 + 1
+		encoded_X = np.zeros((number_of_examples, number_of_patch_chunks * self.number_of_features), dtype=np.uint32)
+
+		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
+
+		for e in range(number_of_examples):
+			memcpy_htod(self.encoded_X_packed_gpu, self.endoded_X_packed_base)
+			self.encode.prepared_call(
+				grid_encode,
+				self.block,
+				X_indptr_gpu,
+				X_indices_gpu,
+				self.encoded_X_packed_gpu,
+				np.int32(e),
+				np.int32(self.dim[0]),
+				np.int32(self.dim[1]),
+				np.int32(self.dim[2]),
+				np.int32(self.patch_dim[0]),
+				np.int32(self.patch_dim[1]),
+				np.int32(self.append_negated),
+				np.int32(0),
+			)
+			ctx.synchronize()
+
+			memcpy_dtoh(encoded_X[e, :], self.encoded_X_packed_gpu)
+
+		return encoded_X.reshape((number_of_examples, number_of_patch_chunks, self.number_of_features))
+
 	def unchunk_encoded_X(self, encoded_X):
 		"""
 		Undo the chunking of encoded_X. The encoded_X is chunked into ta_chunks for processing in the TM. This function "unchunks" the encoded_X.
 
 		:param encoded_X: Encoded patches
-			shape: (num_samples, num_patches * num_ta_chunks)
+			shape: (num_samples, num_patches, num_ta_chunks)
 
 		:return: Unchunked patches
-			shape: (num_samples, num_patches * num_features)
+			shape: (num_samples, num_patches, num_features)
 		"""
 
-		assert encoded_X.shape[1] == self.number_of_patches * self.number_of_ta_chunks, (
-			f"Invalid shape of encoded_X, expected {self.number_of_patches * self.number_of_ta_chunks}, got {encoded_X.shape[1]}. Make sure shape is (num_samples, num_patches * num_ta_chunks)."
-		)
-
-		unchunked_X = np.zeros((encoded_X.shape[0], self.number_of_patches * self.number_of_features), dtype=np.uint8)
-
 		num_samples = encoded_X.shape[0]
+		unchunked_X = np.zeros((num_samples, self.number_of_patches, self.number_of_features), dtype=np.uint8)
 
 		for e in range(num_samples):
 			for p in range(self.number_of_patches):
 				for k in range(self.number_of_features):
 					chunk = k // 32
 					pos = k % 32
-					unchunked_X[e, p * self.number_of_features + k] = (encoded_X[e, p * self.number_of_ta_chunks + chunk] & (1 << pos)) > 0
+					unchunked_X[e, p, k] = (encoded_X[e, p, chunk] & (1 << pos)) > 0
+
+		return unchunked_X.reshape((num_samples, self.number_of_patches, self.number_of_features))
+
+	def unchunk_encoded_X_packed(self, encoded_X_packed):
+		"""
+		Undo the chunking of encoded_X. The encoded_X is chunked into ta_chunks for processing in the TM. This function "unchunks" the encoded_X.
+
+		:param encoded_X_packed: Encoded patches
+			shape: (num_samples, num_patch_chunks, num_features)
+
+		:return: Unchunked patches
+			shape: (num_samples, num_patches, num_features)
+		"""
+
+		num_samples = encoded_X_packed.shape[0]
+		unchunked_X = np.zeros((num_samples, self.number_of_patches, self.number_of_features), dtype=np.uint8)
+
+		for e in range(num_samples):
+			for p in range(self.number_of_patches):
+				chunk = p // 32
+				pos = p % 32
+				for k in range(self.number_of_features):
+					unchunked_X[e, p, k] = (encoded_X_packed[e, chunk, k] & (1 << pos)) > 0
 
 		return unchunked_X.reshape((num_samples, self.number_of_patches, self.number_of_features))
 
