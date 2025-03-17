@@ -51,6 +51,7 @@ class CommonTsetlinMachine:
 		append_negated: bool = True,
 		r: float = 1.0,
 		sr: float | None = None,
+		encode_loc: bool = True,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -63,12 +64,13 @@ class CommonTsetlinMachine:
 		self.q = q
 		self.max_included_literals = max_included_literals
 		self.boost_true_positive_feedback = boost_true_positive_feedback
-		self.append_negated = append_negated
+		self.append_negated = 1 if append_negated else 0
 		self.r = r
 		if sr is None:
 			self.sr = s
 		else:
 			self.sr = sr
+		self.encode_loc = 1 if encode_loc else 0
 		self.grid = grid
 		self.block = block
 
@@ -127,12 +129,6 @@ class CommonTsetlinMachine:
 					self.X_train_indices_gpu,
 					self.encoded_X_gpu,
 					np.int32(e),
-					np.int32(self.dim[0]),
-					np.int32(self.dim[1]),
-					np.int32(self.dim[2]),
-					np.int32(self.patch_dim[0]),
-					np.int32(self.patch_dim[1]),
-					np.int32(self.append_negated),
 					np.int32(0),
 				)
 				ctx.synchronize()
@@ -210,12 +206,6 @@ class CommonTsetlinMachine:
 				self.X_test_indices_gpu,
 				self.encoded_X_packed_gpu,
 				np.int32(e),
-				np.int32(self.dim[0]),
-				np.int32(self.dim[1]),
-				np.int32(self.dim[2]),
-				np.int32(self.patch_dim[0]),
-				np.int32(self.patch_dim[1]),
-				np.int32(self.append_negated),
 				np.int32(0),
 			)
 			ctx.synchronize()
@@ -251,22 +241,17 @@ class CommonTsetlinMachine:
 		self.included_literals_length_gpu = mem_alloc(self.number_of_clauses * 4)
 
 	def _init_kernels(self):
-		# Encode and pack input
-		mod_encode = SourceModule(kernels.code_encode, no_extern_c=True)
-		self.encode = mod_encode.get_function("encode")
-		self.encode.prepare("PPPiiiiiiii")
-
-		self.encode_packed = mod_encode.get_function("encode_packed")
-		self.encode_packed.prepare("PPPiiiiiiii")
-
-		self.produce_autoencoder_examples = mod_encode.get_function("produce_autoencoder_example")
-		self.produce_autoencoder_examples.prepare("PPiPPiPPiPPiiii")
-
 		parameters = f"""
 		#define CLAUSES {self.number_of_clauses}
 		#define THRESH {self.T}
 		#define S {self.s}
 		#define Q {self.q}
+		#define DIM0 {self.dim[0]}
+		#define DIM1 {self.dim[1]}
+		#define DIM2 {self.dim[2]}
+		#define PATCH_DIM0 {self.patch_dim[0]}
+		#define PATCH_DIM1 {self.patch_dim[1]}
+		#define APPEND_NEGATED {self.append_negated}
 		#define STATE_BITS {self.number_of_state_bits}
 		#define BOOST_TRUE_POSITIVE_FEEDBACK {self.boost_true_positive_feedback}
 		#define MAX_INCLUDED_LITERALS {self.max_included_literals}
@@ -277,7 +262,19 @@ class CommonTsetlinMachine:
 		#define FEATURES {self.number_of_features}
 		#define PATCHES {self.number_of_patches}
 		#define MAX_STATE {(1 << self.number_of_state_bits) - 1}
+		#define ENCODE_LOC {self.encode_loc}
 		"""
+
+		# Encode and pack input
+		mod_encode = SourceModule(parameters + kernels.code_header + kernels.code_encode, no_extern_c=True)
+		self.encode = mod_encode.get_function("encode")
+		self.encode.prepare("PPPii")
+
+		self.encode_packed = mod_encode.get_function("encode_packed")
+		self.encode_packed.prepare("PPPii")
+
+		self.produce_autoencoder_examples = mod_encode.get_function("produce_autoencoder_example")
+		self.produce_autoencoder_examples.prepare("PPiPPiPPiPPiiii")
 
 		# Prepare
 		mod_prepare = SourceModule(parameters + kernels.code_header + kernels.code_prepare, no_extern_c=True)
@@ -407,14 +404,15 @@ class CommonTsetlinMachine:
 		memcpy_htod(self.encoded_X_packed_gpu, self.encoded_X_packed_base)
 
 	def _init_fit(self):
-		if self.append_negated:
-			self.number_of_features = (
-				int(self.patch_dim[0] * self.patch_dim[1] * self.dim[2] + (self.dim[0] - self.patch_dim[0]) + (self.dim[1] - self.patch_dim[1])) * 2
-			)
-		else:
+		if self.encode_loc:
 			self.number_of_features = int(
 				self.patch_dim[0] * self.patch_dim[1] * self.dim[2] + (self.dim[0] - self.patch_dim[0]) + (self.dim[1] - self.patch_dim[1])
 			)
+		else:
+			self.number_of_features = int(self.patch_dim[0] * self.patch_dim[1] * self.dim[2])
+
+		if self.append_negated:
+			self.number_of_features *= 2
 
 		if self.max_included_literals is None:
 			self.max_included_literals = self.number_of_features
@@ -516,12 +514,6 @@ class CommonTsetlinMachine:
 				X_indices_gpu,
 				self.encoded_X_packed_gpu,
 				np.int32(e),
-				np.int32(self.dim[0]),
-				np.int32(self.dim[1]),
-				np.int32(self.dim[2]),
-				np.int32(self.patch_dim[0]),
-				np.int32(self.patch_dim[1]),
-				np.int32(self.append_negated),
 				np.int32(0),
 			)
 			ctx.synchronize()
@@ -583,12 +575,6 @@ class CommonTsetlinMachine:
 				X_indices_gpu,
 				self.encoded_X_packed_gpu,
 				np.int32(e),
-				np.int32(self.dim[0]),
-				np.int32(self.dim[1]),
-				np.int32(self.dim[2]),
-				np.int32(self.patch_dim[0]),
-				np.int32(self.patch_dim[1]),
-				np.int32(self.append_negated),
 				np.int32(0),
 			)
 			ctx.synchronize()
@@ -796,6 +782,7 @@ class CommonTsetlinMachine:
 			"boost_true_positive_feedback": self.boost_true_positive_feedback,
 			"number_of_state_bits": self.number_of_state_bits,
 			"append_negated": self.append_negated,
+			"encode_loc": self.encode_loc,
 		}
 
 		# Save to file
@@ -919,6 +906,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		append_negated=True,
 		r: float = 1.0,
 		sr: float | None = None,
+		encode_loc: bool = True,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -933,6 +921,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 			append_negated=append_negated,
 			r=r,
 			sr=sr,
+			encode_loc=encode_loc,
 			grid=grid,
 			block=block,
 		)
@@ -990,6 +979,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		append_negated=True,
 		r: float = 1.0,
 		sr: float | None = None,
+		encode_loc: bool = True,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1004,6 +994,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 			append_negated=append_negated,
 			r=r,
 			sr=sr,
+			encode_loc=encode_loc,
 			grid=grid,
 			block=block,
 		)

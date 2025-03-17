@@ -1,96 +1,75 @@
 #include <curand_kernel.h>
 
 extern "C" {
-__global__ void encode(unsigned int *X_indptr, unsigned int *X_indices, unsigned int *encoded_X, int e, int dim_x,
-                       int dim_y, int dim_z, int patch_dim_x, int patch_dim_y, int append_negated, int class_features) {
+__global__ void encode(unsigned int *X_indptr, unsigned int *X_indices, unsigned int *encoded_X, int e,
+                       int class_features) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-
-    int number_of_features =
-        class_features + patch_dim_x * patch_dim_y * dim_z + (dim_x - patch_dim_x) + (dim_y - patch_dim_y);
-    int number_of_patches = (dim_x - patch_dim_x + 1) * (dim_y - patch_dim_y + 1);
-
-    int number_of_ta_chunks;
-    if (append_negated) {
-        number_of_ta_chunks = (((2 * number_of_features - 1) / 32 + 1));
-    } else {
-        number_of_ta_chunks = (((number_of_features - 1) / 32 + 1));
-    }
 
     unsigned int *indices = &X_indices[X_indptr[e]];
     int number_of_indices = X_indptr[e + 1] - X_indptr[e];
 
     for (int k = 0; k < number_of_indices; ++k) {
-        int y = indices[k] / (dim_x * dim_z);
-        int x = (indices[k] % (dim_x * dim_z)) / dim_z;
-        int z = (indices[k] % (dim_x * dim_z)) % dim_z;
+        int y = indices[k] / (DIM0 * DIM2);
+        int x = (indices[k] % (DIM0 * DIM2)) / DIM2;
+        int z = (indices[k] % (DIM0 * DIM2)) % DIM2;
 
-        for (int patch = index; patch < number_of_patches; patch += stride) {
-            int patch_coordinate_y = patch / (dim_x - patch_dim_x + 1);
-            int patch_coordinate_x = patch % (dim_x - patch_dim_x + 1);
+        for (int patch = index; patch < PATCHES; patch += stride) {
+            int patch_coordinate_y = patch / (DIM0 - PATCH_DIM0 + 1);
+            int patch_coordinate_x = patch % (DIM0 - PATCH_DIM0 + 1);
 
-            if ((y < patch_coordinate_y) || (y >= patch_coordinate_y + patch_dim_y) || (x < patch_coordinate_x) ||
-                (x >= patch_coordinate_x + patch_dim_x)) {
+            if ((y < patch_coordinate_y) || (y >= patch_coordinate_y + PATCH_DIM1) || (x < patch_coordinate_x) ||
+                (x >= patch_coordinate_x + PATCH_DIM0)) {
                 continue;
             }
 
             int p_y = y - patch_coordinate_y;
             int p_x = x - patch_coordinate_x;
 
-            int patch_pos = class_features + (dim_y - patch_dim_y) + (dim_x - patch_dim_x) + p_y * patch_dim_x * dim_z +
-                            p_x * dim_z + z;
+#if ENCODE_LOC
+            int patch_pos =
+                class_features + (DIM1 - PATCH_DIM1) + (DIM0 - PATCH_DIM0) + p_y * PATCH_DIM0 * DIM2 + p_x * DIM2 + z;
+#else
+            int patch_pos = class_features + p_y * PATCH_DIM0 * DIM2 + p_x * DIM2 + z;
+#endif
 
             int chunk_nr = patch_pos / 32;
             int chunk_pos = patch_pos % 32;
-            encoded_X[patch * number_of_ta_chunks + chunk_nr] |= (1U << chunk_pos);
+            encoded_X[patch * LA_CHUNKS + chunk_nr] |= (1U << chunk_pos);
 
-            if (append_negated) {
-                int chunk_nr = (patch_pos + number_of_features) / 32;
-                int chunk_pos = (patch_pos + number_of_features) % 32;
-                encoded_X[patch * number_of_ta_chunks + chunk_nr] &= ~(1U << chunk_pos);
-            }
+#if APPEND_NEGATED
+            chunk_nr = (patch_pos + (FEATURES / 2)) / 32;
+            chunk_pos = (patch_pos + (FEATURES / 2)) % 32;
+            encoded_X[patch * LA_CHUNKS + chunk_nr] &= ~(1U << chunk_pos);
+#endif
         }
     }
 }
 
-__global__ void encode_packed(unsigned int *X_indptr, unsigned int *X_indices, unsigned int *encoded_X, int e,
-                              int dim_x, int dim_y, int dim_z, int patch_dim_x, int patch_dim_y, int append_negated,
-                              int class_features) {
+__global__ void encode_packed(unsigned int *X_indptr, unsigned int *X_indices, unsigned int *encoded_X,
+                              int e, int class_features) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-
-    int number_of_features =
-        class_features + patch_dim_x * patch_dim_y * dim_z + (dim_x - patch_dim_x) + (dim_y - patch_dim_y);
-    int number_of_patches = (dim_x - patch_dim_x + 1) * (dim_y - patch_dim_y + 1);
-    // int number_of_patch_chunks = (number_of_patches - 1) / 32 + 1;
-
-    int number_of_literals;
-    if (append_negated) {
-        number_of_literals = number_of_features * 2;
-    } else {
-        number_of_literals = number_of_features;
-    }
 
     unsigned int *indices = &X_indices[X_indptr[e]];
     int number_of_indices = X_indptr[e + 1] - X_indptr[e];
 
     // Looping over all pixels that are 1
     for (int k = 0; k < number_of_indices; ++k) {
-
         // Coordinate of the pixel
-        int y = indices[k] / (dim_x * dim_z);
-        int x = (indices[k] % (dim_x * dim_z)) / dim_z;
-        int z = (indices[k] % (dim_x * dim_z)) % dim_z;
+        int y = indices[k] / (DIM0 * DIM2);
+        int x = (indices[k] % (DIM0 * DIM2)) / DIM2;
+        int z = (indices[k] % (DIM0 * DIM2)) % DIM2;
 
-        //Looping over each patch
-        for (int patch = index; patch < number_of_patches; patch += stride) {
+        // Looping over each patch
+        for (int patch = index; patch < PATCHES; patch += stride) {
             // Coordinate of the patch
-            int patch_coordinate_y = patch / (dim_x - patch_dim_x + 1);
-            int patch_coordinate_x = patch % (dim_x - patch_dim_x + 1);
+            int patch_coordinate_y = patch / (DIM0 - PATCH_DIM0 + 1);
+            int patch_coordinate_x = patch % (DIM0 - PATCH_DIM0 + 1);
 
             // Ignore patch if the pixel is not inside this patch
-            if ((y < patch_coordinate_y) || (y >= patch_coordinate_y + patch_dim_y) || (x < patch_coordinate_x) ||
-                (x >= patch_coordinate_x + patch_dim_x)) {
+            if ((y < patch_coordinate_y) || (y >= patch_coordinate_y + PATCH_DIM1) || (x < patch_coordinate_x) ||
+                (x >= patch_coordinate_x + PATCH_DIM0)) {
                 continue;
             }
 
@@ -102,14 +81,18 @@ __global__ void encode_packed(unsigned int *X_indptr, unsigned int *X_indices, u
             int p_x = x - patch_coordinate_x;
 
             // Location of this pixel, when all features are layed out in 1d format
-            int patch_pos = class_features + (dim_y - patch_dim_y) + (dim_x - patch_dim_x) + p_y * patch_dim_x * dim_z +
-                            p_x * dim_z + z;
+#if ENCODE_LOC
+            int patch_pos =
+                class_features + (DIM1 - PATCH_DIM1) + (DIM0 - PATCH_DIM0) + p_y * PATCH_DIM0 * DIM2 + p_x * DIM2 + z;
+#else
+            int patch_pos = class_features + p_y * PATCH_DIM0 * DIM2 + p_x * DIM2 + z;
+#endif
 
-            encoded_X[chunk * number_of_literals + patch_pos] |= (1U << pos);
+            encoded_X[chunk * FEATURES + patch_pos] |= (1U << pos);
 
-            if (append_negated) {
-                encoded_X[chunk * number_of_literals + patch_pos + number_of_features] &= ~(1U << pos);
-            }
+#if APPEND_NEGATED
+            encoded_X[chunk * FEATURES + patch_pos + FEATURES / 2] &= ~(1U << pos);
+#endif
         }
     }
 }
