@@ -1,6 +1,6 @@
 #include <curand_kernel.h>
 extern "C" {
-__global__ void prepare(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum) {
+__global__ void prepare(curandState *state, unsigned int *global_ta_state, int *clause_weights) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -24,10 +24,6 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
             else
                 clause_weights[class_id * CLAUSES + clause] = 1;
         }
-    }
-
-    for (int i = 0; i < CLASSES; i++) {
-        class_sum[i] = 0;
     }
 
     state[index] = localState;
