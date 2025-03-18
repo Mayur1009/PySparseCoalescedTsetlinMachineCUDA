@@ -79,6 +79,8 @@ class CommonTsetlinMachine:
 		self.X_train = np.array([])
 		self.X_test = np.array([])
 		self.encoded_Y = np.array([])
+		self.encoded_X_base = np.array([])
+		self.encoded_X_packed_base = np.array([])
 		self.ta_state = np.array([])
 		self.clause_weights = np.array([])
 		self.patch_weights = np.array([])
@@ -92,7 +94,6 @@ class CommonTsetlinMachine:
 		if not self.initialized:
 			self._init_fit()
 			self._init_kernels()
-			self._init_encoded_X()
 			self._reset_states_weights()
 			self.initialized = True
 
@@ -181,6 +182,9 @@ class CommonTsetlinMachine:
 		if not self.initialized:
 			print("Error: Model not trained.")
 			sys.exit(-1)
+
+		if len(self.encoded_X_packed_base) == 0:
+			self._init_encoded_X_packed_base()
 
 		if not np.array_equal(self.X_test, np.concatenate((X.indptr, X.indices))):
 			self.X_test = np.concatenate((X.indptr, X.indices))
@@ -341,44 +345,62 @@ class CommonTsetlinMachine:
 		)
 		ctx.synchronize()
 
-	def _init_encoded_X(self):
-		encoded_X = np.zeros((self.number_of_patches, self.number_of_ta_chunks), dtype=np.uint32)
-		for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
-			for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
-				p = patch_coordinate_y * (self.dim[0] - self.patch_dim[0] + 1) + patch_coordinate_x
+	def _init_fit(self):
+		if self.encode_loc:
+			self.number_of_features = int(
+				self.patch_dim[0] * self.patch_dim[1] * self.dim[2] + (self.dim[0] - self.patch_dim[0]) + (self.dim[1] - self.patch_dim[1])
+			)
+		else:
+			self.number_of_features = int(self.patch_dim[0] * self.patch_dim[1] * self.dim[2])
 
-				if self.append_negated:
-					for k in range(self.number_of_features // 2, self.number_of_features):
-						chunk = k // 32
-						pos = k % 32
-						encoded_X[p, chunk] |= 1 << pos
+		if self.append_negated:
+			self.number_of_features *= 2
 
-				for y_threshold in range(self.dim[1] - self.patch_dim[1]):
-					patch_pos = y_threshold
-					if patch_coordinate_y > y_threshold:
-						chunk = patch_pos // 32
-						pos = patch_pos % 32
-						encoded_X[p, chunk] |= 1 << pos
+		if self.max_included_literals is None:
+			self.max_included_literals = self.number_of_features
 
-						if self.append_negated:
-							chunk = (patch_pos + self.number_of_features // 2) // 32
-							pos = (patch_pos + self.number_of_features // 2) % 32
-							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
+		self.number_of_patches = int((self.dim[0] - self.patch_dim[0] + 1) * (self.dim[1] - self.patch_dim[1] + 1))
+		self.number_of_ta_chunks = int((self.number_of_features - 1) / 32 + 1)
 
-				for x_threshold in range(self.dim[0] - self.patch_dim[0]):
-					patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
-					if patch_coordinate_x > x_threshold:
-						chunk = patch_pos // 32
-						pos = patch_pos % 32
-						encoded_X[p, chunk] |= 1 << pos
+		if len(self.encoded_X_base) == 0:
+			encoded_X = np.zeros((self.number_of_patches, self.number_of_ta_chunks), dtype=np.uint32)
+			for patch_coordinate_y in range(self.dim[1] - self.patch_dim[1] + 1):
+				for patch_coordinate_x in range(self.dim[0] - self.patch_dim[0] + 1):
+					p = patch_coordinate_y * (self.dim[0] - self.patch_dim[0] + 1) + patch_coordinate_x
 
-						if self.append_negated:
-							chunk = (patch_pos + self.number_of_features // 2) // 32
-							pos = (patch_pos + self.number_of_features // 2) % 32
-							encoded_X[p, chunk] &= ~np.uint32(1 << pos)
+					if self.append_negated:
+						for k in range(self.number_of_features // 2, self.number_of_features):
+							chunk = k // 32
+							pos = k % 32
+							encoded_X[p, chunk] |= 1 << pos
 
-		self.encoded_X_base = encoded_X.reshape(-1)
+					for y_threshold in range(self.dim[1] - self.patch_dim[1]):
+						patch_pos = y_threshold
+						if patch_coordinate_y > y_threshold:
+							chunk = patch_pos // 32
+							pos = patch_pos % 32
+							encoded_X[p, chunk] |= 1 << pos
 
+							if self.append_negated:
+								chunk = (patch_pos + self.number_of_features // 2) // 32
+								pos = (patch_pos + self.number_of_features // 2) % 32
+								encoded_X[p, chunk] &= ~np.uint32(1 << pos)
+
+					for x_threshold in range(self.dim[0] - self.patch_dim[0]):
+						patch_pos = (self.dim[1] - self.patch_dim[1]) + x_threshold
+						if patch_coordinate_x > x_threshold:
+							chunk = patch_pos // 32
+							pos = patch_pos % 32
+							encoded_X[p, chunk] |= 1 << pos
+
+							if self.append_negated:
+								chunk = (patch_pos + self.number_of_features // 2) // 32
+								pos = (patch_pos + self.number_of_features // 2) % 32
+								encoded_X[p, chunk] &= ~np.uint32(1 << pos)
+
+			self.encoded_X_base = encoded_X.reshape(-1)
+
+	def _init_encoded_X_packed_base(self):
 		# Encoded X packed
 		encoded_X_packed = np.zeros(((self.number_of_patches - 1) // 32 + 1, self.number_of_features), dtype=np.uint32)
 		if self.append_negated:
@@ -409,23 +431,6 @@ class CommonTsetlinMachine:
 							encoded_X_packed[p_chunk, patch_pos + self.number_of_features // 2] &= ~np.uint32(1 << p_pos)
 
 		self.encoded_X_packed_base = encoded_X_packed.reshape(-1)
-
-	def _init_fit(self):
-		if self.encode_loc:
-			self.number_of_features = int(
-				self.patch_dim[0] * self.patch_dim[1] * self.dim[2] + (self.dim[0] - self.patch_dim[0]) + (self.dim[1] - self.patch_dim[1])
-			)
-		else:
-			self.number_of_features = int(self.patch_dim[0] * self.patch_dim[1] * self.dim[2])
-
-		if self.append_negated:
-			self.number_of_features *= 2
-
-		if self.max_included_literals is None:
-			self.max_included_literals = self.number_of_features
-
-		self.number_of_patches = int((self.dim[0] - self.patch_dim[0] + 1) * (self.dim[1] - self.patch_dim[1] + 1))
-		self.number_of_ta_chunks = int((self.number_of_features - 1) / 32 + 1)
 
 	#### CAUSE and WEIGHT OPERATIONS ####
 	def ta_action(self, clause, ta):
@@ -488,6 +493,12 @@ class CommonTsetlinMachine:
 		if not self.initialized:
 			print("Error: Model not trained.")
 			sys.exit(-1)
+
+		if len(self.encoded_X_packed_base) == 0:
+			self._init_encoded_X_packed_base()
+
+		if len(self.encoded_X_packed_base) == 0:
+			self._init_encoded_X_packed_base()
 
 		X = csr_matrix(X)
 		number_of_examples = X.shape[0]
@@ -554,6 +565,9 @@ class CommonTsetlinMachine:
 		if not self.initialized:
 			print("Error: Model not trained.")
 			sys.exit(-1)
+
+		if len(self.encoded_X_packed_base) == 0:
+			self._init_encoded_X_packed_base()
 
 		X = csr_matrix(X)
 		number_of_examples = X.shape[0]
@@ -687,6 +701,9 @@ class CommonTsetlinMachine:
 		if not self.initialized:
 			print("Error: Model not trained.")
 			sys.exit(-1)
+
+		if len(self.encoded_X_packed_base) == 0:
+			self._init_encoded_X_packed_base()
 
 		X = csr_matrix(X)
 		number_of_examples = X.shape[0]
@@ -851,7 +868,6 @@ class CommonTsetlinMachine:
 
 		self._init_fit()
 		self._init_kernels()
-		self._init_encoded_X()
 
 		memcpy_htod(self.ta_state_gpu, self.ta_state)
 		memcpy_htod(self.clause_weights_gpu, self.clause_weights)
@@ -861,7 +877,7 @@ class CommonTsetlinMachine:
 
 	####################
 
-	#### DEPRECATED ####
+	#### OLD FUNCTIONS ####
 	def get_state(self):
 		self.ta_state = np.empty(
 			self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits,
@@ -908,7 +924,6 @@ class CommonTsetlinMachine:
 		memcpy_htod(self.ta_state_gpu, state[0])
 		memcpy_htod(self.clause_weights_gpu, state[1])
 		memcpy_htod(self.patch_weights_gpu, state[13])
-		self._init_encoded_X()
 		self.initialized = True
 
 		self.X_train = np.array([])
@@ -1326,5 +1341,3 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 			return preds, class_sums
 		else:
 			return preds
-
-
