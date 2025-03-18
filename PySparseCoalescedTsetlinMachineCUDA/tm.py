@@ -89,7 +89,7 @@ class CommonTsetlinMachine:
 		self.initialized = False
 
 	#### FIT AND SCORE ####
-	def _fit(self, X, encoded_Y, epochs=1, incremental=True):
+	def _fit(self, X, encoded_Y, epochs=1, incremental=True, num_minibatches: int = 0, seed: int | None = None):
 		# Initialize fit
 		if not self.initialized:
 			self._init_fit()
@@ -100,6 +100,14 @@ class CommonTsetlinMachine:
 		# If not incremental, clear ta-state and clause_weghts
 		elif not incremental:
 			self._reset_states_weights()
+
+		if num_minibatches == 0:
+			num_minibatches = X.shape[0]
+			minibatches = np.arange(X.shape[0], dtype=np.uint32).reshape(-1, 1)
+		else:
+			minibatches = self._create_minibatches(encoded_Y, num_minibatches, seed)
+
+		mb_sz = minibatches.shape[1]
 
 		# Initialize GPU memory for temporary data
 		X_train_indptr_gpu = mem_alloc(X.indptr.nbytes)
@@ -246,6 +254,21 @@ class CommonTsetlinMachine:
 		included_literals_length_gpu.free()
 
 		return class_sums
+
+	#### MINI_BATCHES ####
+	def _create_minibatches(self, Y, num_minibatches, seed=None):
+		indices = np.arange(Y.shape[0])
+		probs = np.copy(Y).astype(np.float32)
+		num_samples_per_class = np.sum(Y, axis=0, dtype=np.float32)
+		probs /= num_samples_per_class
+
+		rng = np.random.default_rng(seed)
+
+		batches = np.empty((num_minibatches, self.number_of_outputs), dtype=np.uint32)
+		for c in range(self.number_of_outputs):
+			batches[:, c] = rng.choice(indices, num_minibatches, p=probs[:, c])
+
+		return batches
 
 	#### GPU INITIALIZATION ####
 	def _init_kernels(self):
