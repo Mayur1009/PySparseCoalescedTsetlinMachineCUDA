@@ -76,9 +76,9 @@ class CommonTsetlinMachine:
 		self.grid = grid
 		self.block = block
 
-		self.X_train = np.array([])
-		self.X_test = np.array([])
-		self.encoded_Y = np.array([])
+		# self.X_train = np.array([])
+		# self.X_test = np.array([])
+		# self.encoded_Y = np.array([])
 		self.encoded_X_base = np.array([])
 		self.encoded_X_packed_base = np.array([])
 		self.ta_state = np.array([])
@@ -101,25 +101,19 @@ class CommonTsetlinMachine:
 		elif not incremental:
 			self._reset_states_weights()
 
-		# Copy data to Gpu
-		if not np.array_equal(self.X_train, np.concatenate((X.indptr, X.indices))):
-			self.X_train = np.concatenate((X.indptr, X.indices))
-			self.X_train_indptr_gpu = mem_alloc(X.indptr.nbytes)
-			memcpy_htod(self.X_train_indptr_gpu, X.indptr)
-
-			self.X_train_indices_gpu = mem_alloc(X.indices.nbytes)
-			memcpy_htod(self.X_train_indices_gpu, X.indices)
-
-		if not np.array_equal(self.encoded_Y, encoded_Y):
-			self.encoded_Y = encoded_Y
-			self.encoded_Y_gpu = mem_alloc(encoded_Y.nbytes)
-			memcpy_htod(self.encoded_Y_gpu, encoded_Y)
-
 		# Initialize GPU memory for temporary data
+		X_train_indptr_gpu = mem_alloc(X.indptr.nbytes)
+		X_train_indices_gpu = mem_alloc(X.indices.nbytes)
+		encoded_Y_gpu = mem_alloc(encoded_Y.nbytes)
 		encoded_X_gpu = mem_alloc(self.encoded_X_base.nbytes)
 		class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
 		clause_outputs_gpu = mem_alloc(self.number_of_clauses * 4)
 		clause_patches_gpu = mem_alloc(self.number_of_clauses * 4)
+
+		# Copy data to Gpu
+		memcpy_htod(X_train_indptr_gpu, X.indptr)
+		memcpy_htod(X_train_indices_gpu, X.indices)
+		memcpy_htod(encoded_Y_gpu, encoded_Y)
 
 		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_evaluate = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
@@ -134,8 +128,8 @@ class CommonTsetlinMachine:
 				self.encode.prepared_call(
 					grid_encode,
 					self.block,
-					self.X_train_indptr_gpu,
-					self.X_train_indices_gpu,
+					X_train_indptr_gpu,
+					X_train_indices_gpu,
 					encoded_X_gpu,
 					np.int32(e),
 					np.int32(0),
@@ -166,12 +160,15 @@ class CommonTsetlinMachine:
 					clause_outputs_gpu,
 					clause_patches_gpu,
 					encoded_X_gpu,
-					self.encoded_Y_gpu,
+					encoded_Y_gpu,
 					np.int32(e),
 				)
 				ctx.synchronize()
 
 		# Free GPU memory
+		X_train_indptr_gpu.free()
+		X_train_indices_gpu.free()
+		encoded_Y_gpu.free()
 		encoded_X_gpu.free()
 		class_sum_gpu.free()
 		clause_outputs_gpu.free()
@@ -186,20 +183,17 @@ class CommonTsetlinMachine:
 		if len(self.encoded_X_packed_base) == 0:
 			self._init_encoded_X_packed_base()
 
-		if not np.array_equal(self.X_test, np.concatenate((X.indptr, X.indices))):
-			self.X_test = np.concatenate((X.indptr, X.indices))
-
-			self.X_test_indptr_gpu = mem_alloc(X.indptr.nbytes)
-			memcpy_htod(self.X_test_indptr_gpu, X.indptr)
-
-			self.X_test_indices_gpu = mem_alloc(X.indices.nbytes)
-			memcpy_htod(self.X_test_indices_gpu, X.indices)
-
 		# Initialize GPU memory for temporary data
+		X_test_indptr_gpu = mem_alloc(X.indptr.nbytes)
+		X_test_indices_gpu = mem_alloc(X.indices.nbytes)
 		encoded_X_packed_gpu = mem_alloc(self.encoded_X_packed_base.nbytes)
 		class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
 		included_literals_gpu = mem_alloc(self.number_of_clauses * self.number_of_features * 2 * 4)
 		included_literals_length_gpu = mem_alloc(self.number_of_clauses * 4)
+
+		# Copy data to GPU
+		memcpy_htod(X_test_indptr_gpu, X.indptr)
+		memcpy_htod(X_test_indices_gpu, X.indices)
 
 		grid_prepare = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
@@ -222,8 +216,8 @@ class CommonTsetlinMachine:
 			self.encode_packed.prepared_call(
 				grid_encode,
 				self.block,
-				self.X_test_indptr_gpu,
-				self.X_test_indices_gpu,
+				X_test_indptr_gpu,
+				X_test_indices_gpu,
 				encoded_X_packed_gpu,
 				np.int32(e),
 				np.int32(0),
@@ -244,6 +238,8 @@ class CommonTsetlinMachine:
 			memcpy_dtoh(class_sums[e, :], class_sum_gpu)
 
 		# Free GPU memory
+		X_test_indptr_gpu.free()
+		X_test_indices_gpu.free()
 		encoded_X_packed_gpu.free()
 		class_sum_gpu.free()
 		included_literals_gpu.free()
