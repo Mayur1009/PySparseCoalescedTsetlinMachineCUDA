@@ -46,8 +46,54 @@ __global__ void encode(unsigned int *X_indptr, unsigned int *X_indices, unsigned
     }
 }
 
-__global__ void encode_packed(unsigned int *X_indptr, unsigned int *X_indices, unsigned int *encoded_X,
-                              int e, int class_features) {
+__global__ void encode_mb(unsigned int *X_indptr, unsigned int *X_indices, unsigned int *encoded_X, int mb_sz,
+                          int class_features) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    for (int patch = index; patch < PATCHES; patch += stride) {
+        for (int e = 0; e < mb_sz; e++) {
+            unsigned int *indices = &X_indices[X_indptr[e]];
+            int number_of_indices = X_indptr[e + 1] - X_indptr[e];
+            for (int k = 0; k < number_of_indices; ++k) {
+                int y = indices[k] / (DIM0 * DIM2);
+                int x = (indices[k] % (DIM0 * DIM2)) / DIM2;
+                int z = (indices[k] % (DIM0 * DIM2)) % DIM2;
+
+                int patch_coordinate_y = patch / (DIM0 - PATCH_DIM0 + 1);
+                int patch_coordinate_x = patch % (DIM0 - PATCH_DIM0 + 1);
+
+                if ((y < patch_coordinate_y) || (y >= patch_coordinate_y + PATCH_DIM1) || (x < patch_coordinate_x) ||
+                    (x >= patch_coordinate_x + PATCH_DIM0)) {
+                    continue;
+                }
+
+                int p_y = y - patch_coordinate_y;
+                int p_x = x - patch_coordinate_x;
+
+#if ENCODE_LOC
+                int patch_pos = class_features + (DIM1 - PATCH_DIM1) + (DIM0 - PATCH_DIM0) + p_y * PATCH_DIM0 * DIM2 +
+                                p_x * DIM2 + z;
+#else
+                int patch_pos = class_features + p_y * PATCH_DIM0 * DIM2 + p_x * DIM2 + z;
+#endif
+
+                int chunk_nr = patch_pos / 32;
+                int chunk_pos = patch_pos % 32;
+                encoded_X[e * PATCHES * LA_CHUNKS + patch * LA_CHUNKS + chunk_nr] |= (1U << chunk_pos);
+
+#if APPEND_NEGATED
+                chunk_nr = (patch_pos + (FEATURES / 2)) / 32;
+                chunk_pos = (patch_pos + (FEATURES / 2)) % 32;
+                encoded_X[e * PATCHES * LA_CHUNKS + patch * LA_CHUNKS + chunk_nr] &= ~(1U << chunk_pos);
+#endif
+            }
+        }
+    }
+}
+
+__global__ void encode_packed(unsigned int *X_indptr, unsigned int *X_indices, unsigned int *encoded_X, int e,
+                              int class_features) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 

@@ -101,86 +101,105 @@ class CommonTsetlinMachine:
 		elif not incremental:
 			self._reset_states_weights()
 
+		# Create minibatches
+		# If num_minibatches is 0, then a minibatch consists of a single example. And num_minibatches is set to the number of examples.
 		if num_minibatches == 0:
 			num_minibatches = X.shape[0]
 			minibatches = np.arange(X.shape[0], dtype=np.uint32).reshape(-1, 1)
 		else:
 			minibatches = self._create_minibatches(encoded_Y, num_minibatches, seed)
 
+		# Number of samples in each minibatch (number_of_classes if num_minibatches > 0, else 1)
 		mb_sz = minibatches.shape[1]
 
 		# Initialize GPU memory for temporary data
-		X_train_indptr_gpu = mem_alloc(X.indptr.nbytes)
-		X_train_indices_gpu = mem_alloc(X.indices.nbytes)
-		encoded_Y_gpu = mem_alloc(encoded_Y.nbytes)
-		encoded_X_gpu = mem_alloc(self.encoded_X_base.nbytes)
-		class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
-		clause_outputs_gpu = mem_alloc(self.number_of_clauses * 4)
-		clause_patches_gpu = mem_alloc(self.number_of_clauses * 4)
+		encoded_X_mb_gpu = mem_alloc(mb_sz * self.number_of_patches * self.number_of_ta_chunks * 4)
+		class_sum_mb_gpu = mem_alloc(mb_sz * self.number_of_outputs * 4)
+		clause_outputs_mb_gpu = mem_alloc(mb_sz * self.number_of_clauses * 4)
+		clause_patches_mb_gpu = mem_alloc(mb_sz * self.number_of_clauses * 4)
+		encoded_Y_mb_gpu = mem_alloc(mb_sz * self.number_of_outputs * 4)
 
-		# Copy data to Gpu
-		memcpy_htod(X_train_indptr_gpu, X.indptr)
-		memcpy_htod(X_train_indices_gpu, X.indices)
-		memcpy_htod(encoded_Y_gpu, encoded_Y)
+		# Create base arrays to reinitialize after each iteration
+		encoded_X_mb_base = np.repeat(self.encoded_X_base[np.newaxis, :], mb_sz, axis=0).reshape(-1)
+		class_sum_mb_base = np.zeros(mb_sz * self.number_of_outputs, dtype=np.int32)
 
+		# Calculate optimal grid size.....I think.....Maybe wrong??
 		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_evaluate = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_update = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
 
-		class_sum_base = np.zeros(self.number_of_outputs).astype(np.int32)
-		for epoch in range(epochs):
-			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
-				memcpy_htod(class_sum_gpu, class_sum_base)
-				memcpy_htod(encoded_X_gpu, self.encoded_X_base)
+		for _ in range(epochs):
+			# Iterate over minibatches
+			for mb_idx in tqdm(range(num_minibatches), leave=False, desc="Fit"):
+				# Reinitialize with empty arrays
+				memcpy_htod(encoded_X_mb_gpu, encoded_X_mb_base)
+				memcpy_htod(class_sum_mb_gpu, class_sum_mb_base)
 
-				self.encode.prepared_call(
+				# Get minibatch X and Y
+				X_mb = X[minibatches[mb_idx]]
+				Y_mb = encoded_Y[minibatches[mb_idx]].ravel()
+
+				# Copy minibatch to GPU ....... is this slow? Can we move this out of the loop?
+				X_mb_indptr_gpu = mem_alloc(X_mb.indptr.nbytes)
+				X_mb_indices_gpu = mem_alloc(X_mb.indices.nbytes)
+				memcpy_htod(X_mb_indptr_gpu, X_mb.indptr)
+				memcpy_htod(X_mb_indices_gpu, X_mb.indices)
+				memcpy_htod(encoded_Y_mb_gpu, Y_mb)
+
+				# Encode minibatch
+				self.encode_mb.prepared_call(
 					grid_encode,
 					self.block,
-					X_train_indptr_gpu,
-					X_train_indices_gpu,
-					encoded_X_gpu,
-					np.int32(e),
+					X_mb_indptr_gpu,
+					X_mb_indices_gpu,
+					encoded_X_mb_gpu,
+					np.int32(mb_sz),
 					np.int32(0),
 				)
 				ctx.synchronize()
 
-				self.evaluate_update.prepared_call(
+				# Free X_mb_gpu arrays, as they are no longer needed....maybe useless?
+				X_mb_indptr_gpu.free()
+				X_mb_indices_gpu.free()
+
+				# Evaluate minibatch
+				self.evaluate_mb.prepared_call(
 					grid_evaluate,
 					self.block,
 					g.state,
 					self.ta_state_gpu,
 					self.clause_weights_gpu,
-					class_sum_gpu,
-					clause_outputs_gpu,
-					clause_patches_gpu,
-					encoded_X_gpu,
+					class_sum_mb_gpu,
+					clause_outputs_mb_gpu,
+					clause_patches_mb_gpu,
+					encoded_X_mb_gpu,
+					np.int32(mb_sz),
 				)
 				ctx.synchronize()
 
-				self.update.prepared_call(
+				# Update minibatch
+				self.update_mb.prepared_call(
 					grid_update,
 					self.block,
 					g.state,
 					self.ta_state_gpu,
 					self.clause_weights_gpu,
 					self.patch_weights_gpu,
-					class_sum_gpu,
-					clause_outputs_gpu,
-					clause_patches_gpu,
-					encoded_X_gpu,
-					encoded_Y_gpu,
-					np.int32(e),
+					class_sum_mb_gpu,
+					clause_outputs_mb_gpu,
+					clause_patches_mb_gpu,
+					encoded_X_mb_gpu,
+					encoded_Y_mb_gpu,
+					np.int32(mb_sz),
 				)
 				ctx.synchronize()
 
 		# Free GPU memory
-		X_train_indptr_gpu.free()
-		X_train_indices_gpu.free()
-		encoded_Y_gpu.free()
-		encoded_X_gpu.free()
-		class_sum_gpu.free()
-		clause_outputs_gpu.free()
-		clause_patches_gpu.free()
+		encoded_X_mb_gpu.free()
+		class_sum_mb_gpu.free()
+		clause_outputs_mb_gpu.free()
+		clause_patches_mb_gpu.free()
+		encoded_Y_mb_gpu.free()
 		return
 
 	def _score(self, X):
@@ -302,6 +321,9 @@ class CommonTsetlinMachine:
 		self.encode = mod_encode.get_function("encode")
 		self.encode.prepare("PPPii")
 
+		self.encode_mb = mod_encode.get_function("encode_mb")
+		self.encode_mb.prepare("PPPii")
+
 		self.encode_packed = mod_encode.get_function("encode_packed")
 		self.encode_packed.prepare("PPPii")
 
@@ -322,6 +344,12 @@ class CommonTsetlinMachine:
 
 		self.evaluate_update = mod_update.get_function("evaluate")
 		self.evaluate_update.prepare("PPPPPPP")
+
+		self.update_mb = mod_update.get_function("update_mb")
+		self.update_mb.prepare("PPPPPPPPPi")
+
+		self.evaluate_mb = mod_update.get_function("evaluate_mb")
+		self.evaluate_mb.prepare("PPPPPPPi")
 
 		# Evaluate
 		mod_evaluate = SourceModule(parameters + kernels.code_header + kernels.code_evaluate, no_extern_c=True)
@@ -999,7 +1027,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		self.patch_dim = patch_dim
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False):
+	def fit(self, X, Y, epochs=100, incremental=False, num_minibatches: int = 0, seed: int | None = None):
 		if len(X.shape) == 3:
 			print(f"Expecting X with 2D shape, got {X.shape}. Flattening the array...")
 			X = X.reshape((X.shape[0], -1))
@@ -1015,7 +1043,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		for i in range(self.number_of_outputs):
 			encoded_Y[:, i] = np.where(Y == i, 1, 0)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_minibatches=num_minibatches, seed=seed)
 
 	def score(self, X):
 		X = csr_matrix(X)
@@ -1074,7 +1102,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		self.patch_dim = patch_dim
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False):
+	def fit(self, X, Y, epochs=100, incremental=False, num_minibatches: int = 0, seed: int | None = None):
 		if len(X.shape) == 3:
 			print(f"Expecting X with 2D shape, got {X.shape}. Flattening the array...")
 			X = X.reshape((X.shape[0], -1))
@@ -1088,7 +1116,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_minibatches=num_minibatches, seed=seed)
 
 	def score(self, X):
 		X = csr_matrix(X)
@@ -1142,7 +1170,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		)
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False):
+	def fit(self, X, Y, epochs=100, incremental=False, num_minibatches: int = 0, seed: int | None = None):
 		X = csr_matrix(X)
 
 		self.number_of_outputs = Y.shape[1]
@@ -1154,7 +1182,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		self.min_y = None
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_minibatches=num_minibatches, seed=seed)
 
 		return
 
@@ -1209,7 +1237,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		)
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False):
+	def fit(self, X, Y, epochs=100, incremental=False, num_minibatches: int = 0, seed: int | None = None):
 		X = csr_matrix(X)
 
 		self.number_of_outputs = int(np.max(Y) + 1)
@@ -1224,7 +1252,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		for i in range(self.number_of_outputs):
 			encoded_Y[:, i] = np.where(Y == i, 1, 0)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_minibatches=num_minibatches, seed=seed)
 
 		return
 
@@ -1275,7 +1303,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 		)
 		self.negative_clauses = 1
 
-	def fit(self, X, Y, epochs=100, incremental=False):
+	def fit(self, X, Y, epochs=100, incremental=False, num_minibatches: int = 0, seed: int | None = None):
 		X = X.reshape(X.shape[0], X.shape[1], 1)
 
 		self.number_of_outputs = 1
@@ -1286,7 +1314,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 
 		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
 
-		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_minibatches=num_minibatches, seed=seed)
 
 		return
 
