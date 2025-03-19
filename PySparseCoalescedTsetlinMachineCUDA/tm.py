@@ -123,7 +123,7 @@ class CommonTsetlinMachine:
 
 		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_evaluate = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
-		grid_update = (min(self.grid[0], (self.number_of_clauses * self.number_of_outputs + self.block[0] - 1) // self.block[0]), 1, 1)
+		grid_update = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
 
 		class_sum_base = np.zeros(self.number_of_outputs).astype(np.int32)
 		for epoch in range(epochs):
