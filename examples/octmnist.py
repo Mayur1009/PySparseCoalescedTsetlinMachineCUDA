@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
 	for i in range(30):
 		start_training = time()
-		tm.fit(X_train, Y_train, epochs=1, incremental=True, num_batches=45000)
+		tm.fit(X_train, Y_train, epochs=1, incremental=True)
 		stop_training = time()
 
 		start_testing = time()

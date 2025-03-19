@@ -53,6 +53,7 @@ class CommonTsetlinMachine:
 		sr: float | None = None,
 		encode_loc: bool = True,
 		max_weight: int | None = None,
+		skip_probs: bool = False,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -73,6 +74,7 @@ class CommonTsetlinMachine:
 			self.sr = sr
 		self.encode_loc = 1 if encode_loc else 0
 		self.max_weight = max_weight
+		self.skip_probs = skip_probs
 		self.grid = grid
 		self.block = block
 
@@ -115,11 +117,19 @@ class CommonTsetlinMachine:
 			self.encoded_Y_gpu = mem_alloc(encoded_Y.nbytes)
 			memcpy_htod(self.encoded_Y_gpu, encoded_Y)
 
+		# Calculate skip probabilities for each class
+		skip1, skip0 = self._calculate_skip_probs(encoded_Y)
+
 		# Initialize GPU memory for temporary data
 		encoded_X_gpu = mem_alloc(self.encoded_X_base.nbytes)
 		class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
 		clause_outputs_gpu = mem_alloc(self.number_of_clauses * 4)
 		clause_patches_gpu = mem_alloc(self.number_of_clauses * 4)
+		skip1_gpu = mem_alloc(skip1.nbytes)
+		skip0_gpu = mem_alloc(skip0.nbytes)
+
+		memcpy_htod(skip1_gpu, skip1)
+		memcpy_htod(skip0_gpu, skip0)
 
 		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_evaluate = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
@@ -168,6 +178,8 @@ class CommonTsetlinMachine:
 					encoded_X_gpu,
 					self.encoded_Y_gpu,
 					np.int32(e),
+					skip1_gpu,
+					skip0_gpu,
 				)
 				ctx.synchronize()
 
@@ -251,6 +263,19 @@ class CommonTsetlinMachine:
 
 		return class_sums
 
+	#### Skip probabilities ####
+	def _calculate_skip_probs(self, encoded_Y):
+		if self.skip_probs:
+			samples1_per_class = np.sum(encoded_Y, axis=0, dtype=np.float32)
+			samples0_per_class = float(encoded_Y.shape[0]) - samples1_per_class
+			skip1 = 1 - (np.min(samples1_per_class) / samples1_per_class)
+			skip0 = 1 - (np.min(samples0_per_class) / samples0_per_class)
+		else:
+			skip1 = np.zeros(self.number_of_outputs, dtype=np.float32)
+			skip0 = np.zeros(self.number_of_outputs, dtype=np.float32)
+
+		return skip1.astype(np.float32), skip0.astype(np.float32)
+
 	#### GPU INITIALIZATION ####
 	def _init_kernels(self):
 		parameters = f"""
@@ -299,7 +324,7 @@ class CommonTsetlinMachine:
 		# Update
 		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
 		self.update = mod_update.get_function("update")
-		self.update.prepare("PPPPPPPPi")
+		self.update.prepare("PPPPPPPPiPP")
 
 		self.evaluate_update = mod_update.get_function("evaluate")
 		self.evaluate_update.prepare("PPPPPPPP")
@@ -952,6 +977,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		sr: float | None = None,
 		encode_loc: bool = True,
 		max_weight: int | None = None,
+		skip_probs: bool = False,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -968,6 +994,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 			sr=sr,
 			encode_loc=encode_loc,
 			max_weight=max_weight,
+			skip_probs=skip_probs,
 			grid=grid,
 			block=block,
 		)
@@ -1027,6 +1054,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		sr: float | None = None,
 		encode_loc: bool = True,
 		max_weight: int | None = None,
+		skip_probs: bool = False,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1043,6 +1071,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 			sr=sr,
 			encode_loc=encode_loc,
 			max_weight=max_weight,
+			skip_probs=skip_probs,
 			grid=grid,
 			block=block,
 		)
@@ -1098,6 +1127,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		r: float = 1.0,
 		sr: float | None = None,
 		max_weight: int | None = None,
+		skip_probs: bool = False,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1113,6 +1143,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 			r=r,
 			sr=sr,
 			max_weight=max_weight,
+			skip_probs=skip_probs,
 			grid=grid,
 			block=block,
 		)
@@ -1165,6 +1196,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		r: float = 1.0,
 		sr: float | None = None,
 		max_weight: int | None = None,
+		skip_probs: bool = False,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1180,6 +1212,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 			r=r,
 			sr=sr,
 			max_weight=max_weight,
+			skip_probs=skip_probs,
 			grid=grid,
 			block=block,
 		)
@@ -1231,6 +1264,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 		r: float = 1.0,
 		sr: float | None = None,
 		max_weight: int | None = None,
+		skip_probs: bool = False,
 		grid=(16 * 13, 1, 1),
 		block=(128, 1, 1),
 	):
@@ -1246,6 +1280,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 			r=r,
 			sr=sr,
 			max_weight=max_weight,
+			skip_probs=skip_probs,
 			grid=grid,
 			block=block,
 		)

@@ -195,7 +195,7 @@ __global__ void evaluate(curandState *state, unsigned int *global_ta_state, int 
 
 // Update state of Tsetlin Automata team
 __global__ void update(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum,
-                       unsigned int *clause_outputs, int *clause_patches, int *X, int *y, int example) {
+                       unsigned int *clause_outputs, int *clause_patches, int *X, int *y, int example, float *skip1, float *skip0) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -216,6 +216,13 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
                 enc_y = THRESH;
             else
                 enc_y = -THRESH;
+
+            // Skip update with probability skip1 if y == 1 or skip0 if y == 0
+            if (enc_y > 0 && curand_uniform(&localState) <= skip1[class_id]) {
+                continue;
+            } else if (enc_y < 0 && curand_uniform(&localState) <= skip0[class_id]) {
+                continue;
+            }
 
             update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_outputs[clause],
                           clause_patches[clause], X, enc_y, local_class_sum);
