@@ -1072,8 +1072,8 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		X = csr_matrix(X)
 		return self._score(X, chunk_size=chunk_size)
 
-	def predict(self, X, return_class_sums=False, chunk_size=0):
-		class_sums = self.score(X, chunk_size=chunk_size)
+	def predict(self, X, return_class_sums=False):
+		class_sums = self.score(X)
 		preds = np.argmax(class_sums, axis=1)
 		if return_class_sums:
 			return preds, class_sums
@@ -1146,12 +1146,12 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
 		return self._score(X, chunk_size=chunk_size)
 
-	def predict(self, X, return_class_sums=False, chunk_size=0):
+	def predict(self, X, return_class_sums=False):
 		if len(X.shape) == 3:
 			print(f"Expecting X with 2D shape, got {X.shape}. Flattening samples...")
 			X = X.reshape((X.shape[0], -1))
 			print(f"New X.shape => {X.shape}")
-		class_sums = self.score(X, chunk_size=chunk_size)
+		class_sums = self.score(X)
 		preds = (class_sums >= 0).astype(np.uint32)
 		if return_class_sums:
 			return preds, class_sums
@@ -1213,12 +1213,12 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		X = csr_matrix(X)
 		return self._score(X, chunk_size=chunk_size)
 
-	def predict(self, X, return_class_sums=True, chunk_size=0):
+	def predict(self, X, return_class_sums=True):
 		if len(X.shape) == 3:
 			print(f"Expecting X with 2D shape, got {X.shape}. Flattening samples...")
 			X = X.reshape((X.shape[0], -1))
 			print(f"New X.shape => {X.shape}")
-		class_sums = self.score(X, chunk_size=chunk_size)
+		class_sums = self.score(X)
 		preds = (class_sums >= 0).astype(np.uint32)
 		if return_class_sums:
 			return preds, class_sums
@@ -1283,8 +1283,8 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 		X = csr_matrix(X)
 		return self._score(X, chunk_size=chunk_size)
 
-	def predict(self, X, return_class_sums=False, chunk_size=0):
-		class_sums = self.score(X, chunk_size=chunk_size)
+	def predict(self, X, return_class_sums=False):
+		class_sums = self.score(X)
 		preds = np.argmax(class_sums, axis=1)
 		if return_class_sums:
 			return preds, class_sums
@@ -1345,8 +1345,8 @@ class TsetlinMachine(CommonTsetlinMachine):
 		X = X.reshape(X.shape[0], X.shape[1], 1)
 		return self._score(X, chunk_size=chunk_size)[0, :]
 
-	def predict(self, X, return_class_sums=False, chunk_size=0):
-		class_sums = self.score(X, chunk_size=chunk_size)
+	def predict(self, X, return_class_sums=False):
+		class_sums = self.score(X)
 		preds = int(class_sums >= 0)
 
 		if return_class_sums:
