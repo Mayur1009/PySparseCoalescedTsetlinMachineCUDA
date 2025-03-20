@@ -312,8 +312,13 @@ __global__ void update_mb(curandState *state, unsigned int *global_ta_state, int
                 else
                     enc_y = -THRESH;
 
-                if (clause_patches[clause] >= 0)
-                    patch_weights[class_id * CLAUSES * PATCHES + clause * PATCHES + clause_patches[clause]] += 1;
+                if (clause_patches[clause] >= 0) {
+                    // integer overflow
+                    unsigned long long idx = (unsigned long long)(class_id * (unsigned long long)(CLAUSES * PATCHES)) +
+                                             (unsigned long long)(clause * PATCHES) +
+                                             (unsigned long long)(clause_patches[clause]);
+                    patch_weights[idx] += 1;
+                }
 
                 update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state,
                               clause_outputs[clause], clause_patches[clause], X, enc_y, local_class_sum);
