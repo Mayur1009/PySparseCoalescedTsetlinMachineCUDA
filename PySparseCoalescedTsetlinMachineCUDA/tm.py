@@ -202,10 +202,7 @@ class CommonTsetlinMachine:
 		encoded_Y_mb_gpu.free()
 		return
 
-	def _score(self, X, chunk_size=0):
-		if chunk_size == 0 or chunk_size > X.shape[0]:
-			chunk_size = X.shape[0]
-
+	def _score(self, X):
 		if not self.initialized:
 			print("Error: Model not trained.")
 			sys.exit(-1)
@@ -214,17 +211,20 @@ class CommonTsetlinMachine:
 			self._init_encoded_X_packed_base()
 
 		# Initialize GPU memory for temporary data
+		X_test_indptr_gpu = mem_alloc(X.indptr.nbytes)
+		X_test_indices_gpu = mem_alloc(X.indices.nbytes)
 		encoded_X_packed_gpu = mem_alloc(self.encoded_X_packed_base.nbytes)
 		class_sum_gpu = mem_alloc(self.number_of_outputs * 4)
 		included_literals_gpu = mem_alloc(self.number_of_clauses * self.number_of_features * 2 * 4)
 		included_literals_length_gpu = mem_alloc(self.number_of_clauses * 4)
 
-		# Calculate optimal grid size.....I think.....Maybe wrong??
+		# Copy data to GPU
+		memcpy_htod(X_test_indptr_gpu, X.indptr)
+		memcpy_htod(X_test_indices_gpu, X.indices)
+
 		grid_prepare = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_encode = (min(self.grid[0], (self.number_of_patches + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_evaluate = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
-
-		# Convert ta_states to included_literals and included_literals_length
 		self.prepare_packed.prepared_call(
 			grid_prepare,
 			self.block,
@@ -235,61 +235,38 @@ class CommonTsetlinMachine:
 		)
 		ctx.synchronize()
 
-		# Array to store class_sums
 		class_sums = np.zeros((X.shape[0], self.number_of_outputs), dtype=np.int32)
+		for e in tqdm(range(X.shape[0]), leave=False, desc="Predict"):
+			memcpy_htod(class_sum_gpu, class_sums[e, :])
+			memcpy_htod(encoded_X_packed_gpu, self.encoded_X_packed_base)
 
-		# Split indices into chunks
-		chunks = [x for x in range(0, X.shape[0], chunk_size)] + [X.shape[0]]
+			self.encode_packed.prepared_call(
+				grid_encode,
+				self.block,
+				X_test_indptr_gpu,
+				X_test_indices_gpu,
+				encoded_X_packed_gpu,
+				np.int32(e),
+				np.int32(0),
+			)
+			ctx.synchronize()
 
-		# Iterate over chunks
-		for c in tqdm(range(len(chunks) - 1), leave=False, desc="Chunk"):
-			start, end = chunks[c], chunks[c + 1]
-			X_chunk = X[start:end]
+			self.evaluate_packed.prepared_call(
+				grid_evaluate,
+				self.block,
+				included_literals_gpu,
+				included_literals_length_gpu,
+				self.clause_weights_gpu,
+				class_sum_gpu,
+				encoded_X_packed_gpu,
+			)
+			ctx.synchronize()
 
-			# Copy chunk to GPU
-			X_chunk_indptr_gpu = mem_alloc(X_chunk.indptr.nbytes)
-			X_chunk_indices_gpu = mem_alloc(X_chunk.indices.nbytes)
-			memcpy_htod(X_chunk_indptr_gpu, X_chunk.indptr)
-			memcpy_htod(X_chunk_indices_gpu, X_chunk.indices)
-
-			# Iterate over examples in chunk
-			for i in tqdm(range(X_chunk.shape[0]), leave=False, desc="Predict"):
-				# Reinitialize with empty arrays
-				memcpy_htod(class_sum_gpu, class_sums[start + i, :])
-				memcpy_htod(encoded_X_packed_gpu, self.encoded_X_packed_base)
-
-				# Encode
-				self.encode_packed.prepared_call(
-					grid_encode,
-					self.block,
-					X_chunk_indptr_gpu,
-					X_chunk_indices_gpu,
-					encoded_X_packed_gpu,
-					np.int32(i),
-					np.int32(0),
-				)
-				ctx.synchronize()
-
-				# Evaluate
-				self.evaluate_packed.prepared_call(
-					grid_evaluate,
-					self.block,
-					included_literals_gpu,
-					included_literals_length_gpu,
-					self.clause_weights_gpu,
-					class_sum_gpu,
-					encoded_X_packed_gpu,
-				)
-				ctx.synchronize()
-
-				# Copy class_sums back to CPU
-				memcpy_dtoh(class_sums[start + i, :], class_sum_gpu)
-
-			# Free chunk GPU memory
-			X_chunk_indptr_gpu.free()
-			X_chunk_indices_gpu.free()
+			memcpy_dtoh(class_sums[e, :], class_sum_gpu)
 
 		# Free GPU memory
+		X_test_indptr_gpu.free()
+		X_test_indices_gpu.free()
 		encoded_X_packed_gpu.free()
 		class_sum_gpu.free()
 		included_literals_gpu.free()
@@ -1068,9 +1045,9 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
 		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_minibatches=num_minibatches, seed=seed)
 
-	def score(self, X, chunk_size=0):
+	def score(self, X):
 		X = csr_matrix(X)
-		return self._score(X, chunk_size=chunk_size)
+		return self._score(X)
 
 	def predict(self, X, return_class_sums=False):
 		class_sums = self.score(X)
@@ -1141,10 +1118,10 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
 		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental, num_minibatches=num_minibatches, seed=seed)
 
-	def score(self, X, chunk_size=0):
+	def score(self, X):
 		X = csr_matrix(X)
 
-		return self._score(X, chunk_size=chunk_size)
+		return self._score(X)
 
 	def predict(self, X, return_class_sums=False):
 		if len(X.shape) == 3:
@@ -1209,9 +1186,9 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 
 		return
 
-	def score(self, X, chunk_size=0):
+	def score(self, X):
 		X = csr_matrix(X)
-		return self._score(X, chunk_size=chunk_size)
+		return self._score(X)
 
 	def predict(self, X, return_class_sums=True):
 		if len(X.shape) == 3:
@@ -1279,9 +1256,9 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 
 		return
 
-	def score(self, X, chunk_size=0):
+	def score(self, X):
 		X = csr_matrix(X)
-		return self._score(X, chunk_size=chunk_size)
+		return self._score(X)
 
 	def predict(self, X, return_class_sums=False):
 		class_sums = self.score(X)
@@ -1341,9 +1318,9 @@ class TsetlinMachine(CommonTsetlinMachine):
 
 		return
 
-	def score(self, X, chunk_size=0):
+	def score(self, X):
 		X = X.reshape(X.shape[0], X.shape[1], 1)
-		return self._score(X, chunk_size=chunk_size)[0, :]
+		return self._score(X)[0, :]
 
 	def predict(self, X, return_class_sums=False):
 		class_sums = self.score(X)
@@ -1402,9 +1379,9 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 
 		return
 
-	def predict(self, X, return_class_sums=False, chunk_size=0):
+	def predict(self, X, return_class_sums=False):
 		X = X.reshape(X.shape[0], X.shape[1], 1)
-		class_sums = self._score(X, chunk_size=chunk_size)
+		class_sums = self._score(X)
 		preds = 1.0 * (class_sums[0, :]) * (self.max_y - self.min_y) / (self.T) + self.min_y
 
 		if return_class_sums:
