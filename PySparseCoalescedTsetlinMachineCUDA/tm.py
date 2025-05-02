@@ -805,7 +805,7 @@ class CommonTsetlinMachine:
 			self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
 			memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
 
-		if np.array_equal(self.clause_weights, np.array([])):
+		if np.array_equal(self.patch_weights, np.array([])):
 			self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
 			memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
