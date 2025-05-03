@@ -794,20 +794,16 @@ class CommonTsetlinMachine:
 	#### SAVE AND LOAD ####
 	def save(self, fname=""):
 		# Copy data from GPU to CPU
-		if np.array_equal(self.ta_state, np.array([])):
-			self.ta_state = np.empty(
-				self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits,
-				dtype=np.uint32,
-			)
-			memcpy_dtoh(self.ta_state, self.ta_state_gpu)
+		self.ta_state = np.empty(
+			self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits,
+			dtype=np.uint32,
+		)
+		self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
+		self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
 
-		if np.array_equal(self.clause_weights, np.array([])):
-			self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
-			memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
-
-		if np.array_equal(self.patch_weights, np.array([])):
-			self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
-			memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
+		memcpy_dtoh(self.ta_state, self.ta_state_gpu)
+		memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
+		memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
 		state_dict = {
 			# State arrays
