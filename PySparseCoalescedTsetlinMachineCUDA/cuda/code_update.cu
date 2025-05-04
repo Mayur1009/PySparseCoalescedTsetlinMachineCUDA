@@ -66,9 +66,8 @@ __device__ inline unsigned int get_state(unsigned int *ta_state, int clause, int
     return state;
 }
 
-__device__ inline void update_clause(curandState *localState, int *clause_weight, int *patch_weight,
-                                     unsigned int *ta_state, int clause_output, int clause_patch, int *X, int y,
-                                     int class_sum) {
+__device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state,
+                                     int clause_output, int clause_patch, int *X, int y, int class_sum) {
     int target = 1 - 2 * (class_sum > y);
 
     if (target == -1 && curand_uniform(localState) > 1.0 * Q / max(1, CLASSES - 1)) {
@@ -84,9 +83,6 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
 
             if (clause_output && abs(*clause_weight) < MAX_WEIGHT) {
                 (*clause_weight) += sign;
-            }
-            if (clause_output && patch_weight[clause_patch] < INT_MAX) {
-                patch_weight[clause_patch] += sign;
             }
 
             // Type I Feedback
@@ -132,9 +128,6 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
             if (abs(*clause_weight) < MAX_WEIGHT) {
                 (*clause_weight) -= sign;
             }
-            if (patch_weight[clause_patch] > INT_MIN) {
-                patch_weight[clause_patch] -= sign;
-            }
             // (*clause_weight) -= sign;
 #if NEGATIVE_CLAUSES == 0
             if (*clause_weight < 1) {
@@ -151,8 +144,8 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
 }
 
 // Evaluate example
-__global__ void evaluate(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum,
-                         unsigned int *clause_outputs, int *clause_patches, int *X) {
+__global__ void evaluate(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *patch_weights,
+                         int *class_sum, unsigned int *clause_outputs, int *clause_patches, int *X) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     curandState localState = state[index];
@@ -185,6 +178,7 @@ __global__ void evaluate(curandState *state, unsigned int *global_ta_state, int 
 
         if (output_one_patches_count > 0) {
             int patch_id = curand(&localState) % output_one_patches_count;
+            patch_weights[clause * PATCHES + output_one_patches[patch_id]]++;
             clause_patches[clause] = output_one_patches[patch_id];
             clause_outputs[clause] = 1;
             for (int class_id = 0; class_id < CLASSES; ++class_id) {
@@ -200,8 +194,8 @@ __global__ void evaluate(curandState *state, unsigned int *global_ta_state, int 
 }
 
 // Update state of Tsetlin Automata team
-__global__ void update(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *patch_weights,
-                       int *class_sum, unsigned int *clause_outputs, int *clause_patches, int *X, int *y, int example) {
+__global__ void update(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum,
+                       unsigned int *clause_outputs, int *clause_patches, int *X, int *y, int example) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -223,11 +217,8 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
             else
                 enc_y = -THRESH;
 
-            unsigned long long pw_idx = (unsigned long long)(class_id * (unsigned long long)(CLAUSES * PATCHES)) +
-                                        (unsigned long long)(clause * PATCHES);
-
-            update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], &patch_weights[pw_idx], ta_state,
-                          clause_outputs[clause], clause_patches[clause], X, enc_y, local_class_sum);
+            update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_outputs[clause],
+                          clause_patches[clause], X, enc_y, local_class_sum);
         }
     }
 

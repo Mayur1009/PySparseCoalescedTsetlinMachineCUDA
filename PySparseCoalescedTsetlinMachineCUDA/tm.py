@@ -148,6 +148,7 @@ class CommonTsetlinMachine:
 					g.state,
 					self.ta_state_gpu,
 					self.clause_weights_gpu,
+					self.patch_weights_gpu,
 					class_sum_gpu,
 					clause_outputs_gpu,
 					clause_patches_gpu,
@@ -161,7 +162,6 @@ class CommonTsetlinMachine:
 					g.state,
 					self.ta_state_gpu,
 					self.clause_weights_gpu,
-					self.patch_weights_gpu,
 					class_sum_gpu,
 					clause_outputs_gpu,
 					clause_patches_gpu,
@@ -299,10 +299,10 @@ class CommonTsetlinMachine:
 		# Update
 		mod_update = SourceModule(parameters + kernels.code_header + kernels.code_update, no_extern_c=True)
 		self.update = mod_update.get_function("update")
-		self.update.prepare("PPPPPPPPPi")
+		self.update.prepare("PPPPPPPPi")
 
 		self.evaluate_update = mod_update.get_function("evaluate")
-		self.evaluate_update.prepare("PPPPPPP")
+		self.evaluate_update.prepare("PPPPPPPP")
 
 		# Evaluate
 		mod_evaluate = SourceModule(parameters + kernels.code_header + kernels.code_evaluate, no_extern_c=True)
@@ -331,7 +331,7 @@ class CommonTsetlinMachine:
 		# Allocate GPU memory
 		self.ta_state_gpu = mem_alloc(self.number_of_clauses * self.number_of_ta_chunks * self.number_of_state_bits * 4)
 		self.clause_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * 4)
-		self.patch_weights_gpu = mem_alloc(self.number_of_outputs * self.number_of_clauses * self.number_of_patches * 4)
+		self.patch_weights_gpu = mem_alloc(self.number_of_clauses * self.number_of_patches * 4)
 
 	#### STATES, WEIGHTS, AND INPUT INITIALIZATION ####
 	def _reset_states_weights(self):
@@ -475,12 +475,11 @@ class CommonTsetlinMachine:
 		return self.clause_weights.reshape((self.number_of_outputs, self.number_of_clauses))
 
 	def get_patch_weights(self):
-		self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
+		self.patch_weights = np.empty(self.number_of_clauses * self.number_of_patches, dtype=np.int32)
 		memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
 
 		return self.patch_weights.reshape(
 			(
-				self.number_of_outputs,
 				self.number_of_clauses,
 				self.dim[0] - self.patch_dim[0] + 1,
 				self.dim[1] - self.patch_dim[1] + 1,
@@ -799,7 +798,7 @@ class CommonTsetlinMachine:
 			dtype=np.uint32,
 		)
 		self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
-		self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
+		self.patch_weights = np.empty(self.number_of_clauses * self.number_of_patches, dtype=np.int32)
 
 		memcpy_dtoh(self.ta_state, self.ta_state_gpu)
 		memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
@@ -880,7 +879,7 @@ class CommonTsetlinMachine:
 			dtype=np.uint32,
 		)
 		self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
-		self.patch_weights = np.empty(self.number_of_outputs * self.number_of_clauses * self.number_of_patches, dtype=np.int32)
+		self.patch_weights = np.empty(self.number_of_clauses * self.number_of_patches, dtype=np.int32)
 		memcpy_dtoh(self.ta_state, self.ta_state_gpu)
 		memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
 		memcpy_dtoh(self.patch_weights, self.patch_weights_gpu)
