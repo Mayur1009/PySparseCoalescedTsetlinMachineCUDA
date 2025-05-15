@@ -989,7 +989,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 
 		encoded_Y = np.empty((Y.shape[0], self.number_of_outputs), dtype=np.int32)
 		for i in range(self.number_of_outputs):
-			encoded_Y[:, i] = np.where(Y == i, 1, 0)
+			encoded_Y[:, i] = np.where(Y == i, self.T, -self.T)
 
 		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
@@ -1062,7 +1062,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		self.max_y = None
 		self.min_y = None
 
-		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
+		encoded_Y = np.where(Y == 1, self.T, -self.T).astype(np.int32)
 
 		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
@@ -1129,7 +1129,7 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 		self.max_y = None
 		self.min_y = None
 
-		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
+		encoded_Y = np.where(Y == 1, self.T, -self.T).astype(np.int32)
 		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
 		return
@@ -1198,7 +1198,7 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 
 		encoded_Y = np.empty((Y.shape[0], self.number_of_outputs), dtype=np.int32)
 		for i in range(self.number_of_outputs):
-			encoded_Y[:, i] = np.where(Y == i, 1, 0)
+			encoded_Y[:, i] = np.where(Y == i, self.T, -self.T)
 
 		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
@@ -1260,7 +1260,7 @@ class TsetlinMachine(CommonTsetlinMachine):
 		self.max_y = None
 		self.min_y = None
 
-		encoded_Y = np.where(Y == 1, 1, 0).astype(np.int32)
+		encoded_Y = np.where(Y == 1, self.T, -self.T).astype(np.int32)
 
 		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 

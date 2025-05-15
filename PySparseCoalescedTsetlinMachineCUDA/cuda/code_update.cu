@@ -212,10 +212,6 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
                 local_class_sum = -THRESH;
             }
             int enc_y = y[example * CLASSES + class_id];
-            if (enc_y > 0)
-                enc_y = THRESH;
-            else
-                enc_y = -THRESH;
 
             update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_outputs[clause],
                           clause_patches[clause], X, enc_y, local_class_sum);
