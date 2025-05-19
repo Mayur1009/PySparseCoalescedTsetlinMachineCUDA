@@ -71,7 +71,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		)
 		self.dim = dim
 		self.patch_dim = patch_dim
-		self.negative_clauses = 1
+		# self.negative_clauses = 1
 
 	def fit(self, X, Y, epochs=100, incremental=False):
 		if len(X.shape) == 3:
@@ -81,6 +81,7 @@ class MultiClassConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		X = csr_matrix(X)
 
 		self.number_of_outputs = int(np.max(Y) + 1)
+		self.negative_clauses = np.ones(self.number_of_outputs, dtype=np.uint32)
 
 		self.max_y = None
 		self.min_y = None
@@ -146,7 +147,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		)
 		self.dim = dim
 		self.patch_dim = patch_dim
-		self.negative_clauses = 1
+		# self.negative_clauses = 1
 
 	def fit(self, X, Y, epochs=100, incremental=False):
 		if len(X.shape) == 3:
@@ -156,6 +157,7 @@ class MultiOutputConvolutionalTsetlinMachine2D(CommonTsetlinMachine):
 		X = csr_matrix(X)
 
 		self.number_of_outputs = Y.shape[1]
+		self.negative_clauses = np.ones(self.number_of_outputs, dtype=np.uint32)
 
 		self.max_y = None
 		self.min_y = None
@@ -214,12 +216,13 @@ class MultiOutputTsetlinMachine(CommonTsetlinMachine):
 			grid=grid,
 			block=block,
 		)
-		self.negative_clauses = 1
+		# self.negative_clauses = 1
 
 	def fit(self, X, Y, epochs=100, incremental=False):
 		X = csr_matrix(X)
 
 		self.number_of_outputs = Y.shape[1]
+		self.negative_clauses = np.ones(self.number_of_outputs, dtype=np.uint32)
 
 		self.dim = (X.shape[1], 1, 1)
 		self.patch_dim = (X.shape[1], 1)
@@ -281,12 +284,13 @@ class MultiClassTsetlinMachine(CommonTsetlinMachine):
 			grid=grid,
 			block=block,
 		)
-		self.negative_clauses = 1
+		# self.negative_clauses = 1
 
 	def fit(self, X, Y, epochs=100, incremental=False):
 		X = csr_matrix(X)
 
 		self.number_of_outputs = int(np.max(Y) + 1)
+		self.negative_clauses = np.ones(self.number_of_outputs, dtype=np.uint32)
 
 		self.dim = (X.shape[1], 1, 1)
 		self.patch_dim = (X.shape[1], 1)
@@ -347,12 +351,13 @@ class TsetlinMachine(CommonTsetlinMachine):
 			grid=grid,
 			block=block,
 		)
-		self.negative_clauses = 1
+		# self.negative_clauses = 1
 
 	def fit(self, X, Y, epochs=100, incremental=False):
 		X = X.reshape(X.shape[0], X.shape[1], 1)
 
 		self.number_of_outputs = 1
+		self.negative_clauses = np.ones(self.number_of_outputs, dtype=np.uint32)
 		self.patch_dim = (X.shape[1], 1, 1)
 
 		self.max_y = None
@@ -408,12 +413,13 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 			grid=grid,
 			block=block,
 		)
-		self.negative_clauses = 0
+		# self.negative_clauses = 0
 
 	def fit(self, X, Y, epochs=100, incremental=False):
 		X = X.reshape(X.shape[0], X.shape[1], 1)
 
 		self.number_of_outputs = 1
+		self.negative_clauses = np.zeros(self.number_of_outputs, dtype=np.uint32)
 		self.patch_dim = (X.shape[1], 1, 1)
 
 		self.max_y = np.max(Y)
