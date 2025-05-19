@@ -449,6 +449,7 @@ class HybridConvolutionalTsetlinMachine(CommonTsetlinMachine):
 
 	IMP: THE CLASSIFICATION LABELS MUST BE ONE-HOT ENCODED.
 	"""
+
 	def __init__(
 		self,
 		number_of_clauses,
@@ -456,7 +457,7 @@ class HybridConvolutionalTsetlinMachine(CommonTsetlinMachine):
 		s,
 		dim,
 		patch_dim,
-		class_types: list[Literal["C", "R"]],
+		class_types: list[Literal["C", "R", "L"]],
 		q: float = 1.0,
 		max_included_literals=None,
 		boost_true_positive_feedback=1,
@@ -490,24 +491,71 @@ class HybridConvolutionalTsetlinMachine(CommonTsetlinMachine):
 		self.class_types = class_types
 
 	def fit(self, X, Y, epochs=100, incremental=False):
-		X = X.reshape(X.shape[0], X.shape[1], 1)
+		X = csr_matrix(X)
+		if len(Y.shape) == 1:
+			Y = Y.reshape((Y.shape[0], 1))
 
-		assert len(self.class_types) == Y.shape[1], "Number of class types must match number of outputs."
+		assert len(self.class_types) == Y.shape[1], f"Number of class types ({len(self.class_types)}) does not match {Y.shape[1]=}"
 
-		self.number_of_outputs = Y.shape[1]
+		self.y_layout = []
+		self.number_of_outputs = 0
+		for i, ct in enumerate(self.class_types):
+			if ct == "R" or ct == "L":
+				# Regression or Multi-Label
+				self.number_of_outputs += 1
+				self.y_layout.append(f"{ct}1")
+			elif ct == "C":
+				# Classification
+				self.number_of_outputs += int(np.max(Y[:, i])) + 1
+				self.y_layout.append(f"{ct}{int(np.max(Y[:, i])) + 1}")
+
 		self.negative_clauses = np.zeros(self.number_of_outputs, dtype=np.uint32)
 		encoded_Y = np.empty((Y.shape[0], self.number_of_outputs), dtype=np.int32)
 
 		for i, ct in enumerate(self.class_types):
-			if ct == "C":
-				encoded_Y[:, i] = np.where(Y[:, i] == 1, self.T, -self.T)
-				self.negative_clauses[i] = 1
-			elif ct == "R":
+			if ct == "R":
 				self.max_y = np.max(Y[:, i])
 				self.min_y = np.min(Y[:, i])
 				encoded_Y[:, i] = ((Y[:, i] - self.min_y) / (self.max_y - self.min_y) * self.T).astype(np.int32)
 				self.negative_clauses[i] = 0
+			elif ct == "L":
+				encoded_Y[:, i] = np.where(Y[:, i] == 1, self.T, -self.T)
+				self.negative_clauses[i] = 1
+			elif ct == "C":
+				# Classification
+				for j in range(int(np.max(Y[:, i]) + 1)):
+					encoded_Y[:, i + j] = np.where(Y[:, i] == j, self.T, -self.T)
+					self.negative_clauses[i + j] = 1
 
 		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
 
 		return
+
+	def score(self, X):
+		X = csr_matrix(X)
+		return self._score(X)
+
+	def predict(self, X, return_class_sums=False):
+		if len(X.shape) == 3:
+			print(f"Expecting X with 2D shape, got {X.shape}. Flattening samples...")
+			X = X.reshape((X.shape[0], -1))
+			print(f"New X.shape => {X.shape}")
+
+		class_sums = self.score(X)
+
+		preds = np.zeros((X.shape[0], len(self.class_types)), dtype=np.float32)
+		for i, ct in enumerate(self.class_types):
+			if ct == "R":
+				preds[:, i] = 1.0 * (class_sums[:, i]) * (self.max_y - self.min_y) / (self.T) + self.min_y
+			elif ct == "L":
+				preds[:, i] = (class_sums[:, i] >= 0).astype(np.uint32)
+			elif ct == "C":
+				n = int(self.y_layout[i][1:])
+				preds[:, i] = np.argmax(class_sums[:, i : i + n], axis=1)
+
+		preds = preds.squeeze()
+		if return_class_sums:
+			# NOTE: preds.shape[1] != class_sums.shape[1]
+			return preds, class_sums
+		else:
+			return preds
