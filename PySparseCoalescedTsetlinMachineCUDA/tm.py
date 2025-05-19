@@ -434,3 +434,75 @@ class RegressionTsetlinMachine(CommonTsetlinMachine):
 			return preds, class_sums
 		else:
 			return preds
+
+
+class HybridConvolutionalTsetlinMachine(CommonTsetlinMachine):
+	"""
+	A hybrid TM, combining the Convolutional TM with a Regression TM.
+	The class_types parameter is used to specify the type of each output, if it is a classification or regression task.
+
+	IMP: THE CLASSIFICATION LABELS MUST BE ONE-HOT ENCODED.
+	"""
+	# TODO: Negative clauses needs to be changes from integer to array of integers.
+	def __init__(
+		self,
+		number_of_clauses,
+		T,
+		s,
+		dim,
+		patch_dim,
+		class_types: list[Literal["C", "R"]],
+		q: float = 1.0,
+		max_included_literals=None,
+		boost_true_positive_feedback=1,
+		number_of_state_bits=8,
+		append_negated=True,
+		r: float = 1.0,
+		sr: float | None = None,
+		encode_loc: bool = True,
+		max_weight: int | None = None,
+		grid=(16 * 13, 1, 1),
+		block=(128, 1, 1),
+	):
+		super().__init__(
+			number_of_clauses,
+			T,
+			s,
+			q=q,
+			max_included_literals=max_included_literals,
+			boost_true_positive_feedback=boost_true_positive_feedback,
+			number_of_state_bits=number_of_state_bits,
+			append_negated=append_negated,
+			r=r,
+			sr=sr,
+			max_weight=max_weight,
+			encode_loc=encode_loc,
+			grid=grid,
+			block=block,
+		)
+		self.dim = dim
+		self.patch_dim = patch_dim
+		self.class_types = class_types
+
+	def fit(self, X, Y, epochs=100, incremental=False):
+		X = X.reshape(X.shape[0], X.shape[1], 1)
+
+		assert len(self.class_types) == Y.shape[1], "Number of class types must match number of outputs."
+
+		self.number_of_outputs = Y.shape[1]
+		self.negative_clauses = np.zeros(self.number_of_outputs, dtype=np.uint32)
+		encoded_Y = np.empty((Y.shape[0], self.number_of_outputs), dtype=np.int32)
+
+		for i, ct in enumerate(self.class_types):
+			if ct == "C":
+				encoded_Y[:, i] = np.where(Y[:, i] == 1, self.T, -self.T)
+				self.negative_clauses[i] = 1
+			elif ct == "R":
+				self.max_y = np.max(Y[:, i])
+				self.min_y = np.min(Y[:, i])
+				encoded_Y[:, i] = ((Y[:, i] - self.min_y) / (self.max_y - self.min_y) * self.T).astype(np.int32)
+				self.negative_clauses[i] = 0
+
+		self._fit(X, encoded_Y, epochs=epochs, incremental=incremental)
+
+		return
