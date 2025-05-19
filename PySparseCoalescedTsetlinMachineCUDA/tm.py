@@ -449,7 +449,6 @@ class HybridConvolutionalTsetlinMachine(CommonTsetlinMachine):
 
 	IMP: THE CLASSIFICATION LABELS MUST BE ONE-HOT ENCODED.
 	"""
-	# TODO: Negative clauses needs to be changes from integer to array of integers.
 	def __init__(
 		self,
 		number_of_clauses,

@@ -67,7 +67,7 @@ __device__ inline unsigned int get_state(unsigned int *ta_state, int clause, int
 }
 
 __device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state,
-                                     int clause_output, int clause_patch, int *X, int y, int class_sum) {
+                                     int clause_output, int clause_patch, int *X, int y, int class_sum, int class_id) {
     int target = 1 - 2 * (class_sum > y);
 
     if (target == -1 && curand_uniform(localState) > 1.0 * Q / max(1, CLASSES - 1)) {
@@ -129,11 +129,11 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
                 (*clause_weight) -= sign;
             }
             // (*clause_weight) -= sign;
-#if NEGATIVE_CLAUSES == 0
-            if (*clause_weight < 1) {
+// #if NEGATIVE_CLAUSES == 0
+            if (NEGATIVE_CLAUSES[class_id] == 0 && *clause_weight < 1) {
                 *clause_weight = 1;
             }
-#endif
+// #endif
 
             for (int la_chunk = 0; la_chunk < LA_CHUNKS; ++la_chunk) {
                 inc(ta_state, 0, la_chunk,
@@ -214,7 +214,7 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
             int enc_y = y[example * CLASSES + class_id];
 
             update_clause(&localState, &clause_weights[class_id * CLAUSES + clause], ta_state, clause_outputs[clause],
-                          clause_patches[clause], X, enc_y, local_class_sum);
+                          clause_patches[clause], X, enc_y, local_class_sum, class_id);
         }
     }
 

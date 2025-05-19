@@ -241,7 +241,6 @@ class CommonTsetlinMachine:
 		#define STATE_BITS {self.number_of_state_bits}
 		#define BOOST_TRUE_POSITIVE_FEEDBACK {self.boost_true_positive_feedback}
 		#define MAX_INCLUDED_LITERALS {self.max_included_literals}
-		#define NEGATIVE_CLAUSES {self.negative_clauses}
 		#define RESISTANCE {self.r}
 		#define SR {self.sr}
 		#define CLASSES {self.number_of_outputs}
@@ -250,6 +249,7 @@ class CommonTsetlinMachine:
 		#define MAX_STATE {(1 << self.number_of_state_bits) - 1}
 		#define ENCODE_LOC {self.encode_loc}
 		#define MAX_WEIGHT {"INT_MAX" if self.max_weight is None else self.max_weight}
+		__device__ int NEGATIVE_CLAUSES[{self.number_of_outputs}] = {{{",".join([str(i) for i in self.negative_clauses])}}};
 		"""
 
 		# Encode and pack input
