@@ -3,7 +3,7 @@ from PySparseCoalescedTsetlinMachineCUDA.tm import MultiClassConvolutionalTsetli
 import numpy as np
 from time import time
 
-from keras.api.datasets import mnist
+from keras.datasets import mnist
 
 if __name__ == "__main__":
 	(X_train, Y_train), (X_test, Y_test) = mnist.load_data()
