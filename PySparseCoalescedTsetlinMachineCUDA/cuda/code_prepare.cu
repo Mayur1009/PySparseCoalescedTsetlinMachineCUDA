@@ -1,6 +1,6 @@
 #include <curand_kernel.h>
 extern "C" {
-__global__ void prepare(curandState *state, unsigned int *global_ta_state, int *clause_weights) {
+__global__ void prepare(curandState *state, unsigned int *global_ta_state, float *clause_weights) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -20,9 +20,9 @@ __global__ void prepare(curandState *state, unsigned int *global_ta_state, int *
     for (int clause = 0; clause < CLAUSES; clause++) {
         for (int class_id = 0; class_id < CLASSES; ++class_id) {
             if (NEGATIVE_CLAUSES)
-                clause_weights[class_id * CLAUSES + clause] = 1 - 2 * (curand(&localState) % 2);
+                clause_weights[class_id * CLAUSES + clause] = (float)(1 - 2.0 * (float)(curand(&localState) % 2));
             else
-                clause_weights[class_id * CLAUSES + clause] = 1;
+                clause_weights[class_id * CLAUSES + clause] = 1.0;
         }
     }
 

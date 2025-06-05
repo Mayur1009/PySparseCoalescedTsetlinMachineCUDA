@@ -125,7 +125,7 @@ class CommonTsetlinMachine:
 		grid_evaluate = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
 		grid_update = (min(self.grid[0], (self.number_of_clauses + self.block[0] - 1) // self.block[0]), 1, 1)
 
-		class_sum_base = np.zeros(self.number_of_outputs).astype(np.int32)
+		class_sum_base = np.zeros(self.number_of_outputs).astype(np.float32)
 		for epoch in range(epochs):
 			for e in tqdm(range(X.shape[0]), leave=False, desc="Fit"):
 				memcpy_htod(class_sum_gpu, class_sum_base)
@@ -214,7 +214,7 @@ class CommonTsetlinMachine:
 		)
 		ctx.synchronize()
 
-		class_sums = np.zeros((X.shape[0], self.number_of_outputs), dtype=np.int32)
+		class_sums = np.zeros((X.shape[0], self.number_of_outputs), dtype=np.float32)
 		for e in tqdm(range(X.shape[0]), leave=False, desc="Predict"):
 			memcpy_htod(class_sum_gpu, class_sums[e, :])
 			memcpy_htod(encoded_X_packed_gpu, self.encoded_X_packed_base)
@@ -275,7 +275,7 @@ class CommonTsetlinMachine:
 		#define PATCHES {self.number_of_patches}
 		#define MAX_STATE {(1 << self.number_of_state_bits) - 1}
 		#define ENCODE_LOC {self.encode_loc}
-		#define MAX_WEIGHT {"INT_MAX" if self.max_weight is None else self.max_weight}
+		#define MAX_WEIGHT {"100.0" if self.max_weight is None else self.max_weight}
 		"""
 
 		# Encode and pack input
@@ -469,7 +469,7 @@ class CommonTsetlinMachine:
 		return ta_states.reshape((self.number_of_clauses, self.number_of_features))
 
 	def get_weights(self):
-		self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.int32)
+		self.clause_weights = np.empty(self.number_of_outputs * self.number_of_clauses, dtype=np.float32)
 		memcpy_dtoh(self.clause_weights, self.clause_weights_gpu)
 
 		return self.clause_weights.reshape((self.number_of_outputs, self.number_of_clauses))

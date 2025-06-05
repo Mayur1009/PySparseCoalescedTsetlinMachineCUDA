@@ -20,13 +20,14 @@ if __name__ == "__main__":
 		block=(128, 1, 1),
 	)
 
-	for i in range(5):
+	for i in range(10):
 		start_training = time()
 		tm.fit(X_train, Y_train, epochs=1, incremental=True)
 		stop_training = time()
 
 		start_testing = time()
-		result_test = 100 * (tm.predict(X_test) == Y_test).mean()
+		pred, cs = tm.predict(X_test, return_class_sums=True)
+		result_test = 100 * (pred == Y_test).mean()
 		stop_testing = time()
 
 		result_train = 100 * (tm.predict(X_train) == Y_train).mean()
@@ -34,3 +35,4 @@ if __name__ == "__main__":
 		print(
 			f"Epoch {i + 1} | Train Time: {stop_training - start_training:.2f}s, Test Time: {stop_testing - start_testing:.2f}s | Train Accuracy: {result_train:.4f}, Test Accuracy: {result_test:.4f}"
 		)
+

@@ -1,7 +1,7 @@
 from PySparseCoalescedTsetlinMachineCUDA.tm import MultiClassConvolutionalTsetlinMachine2D
 import numpy as np
 from time import time
-from keras.api.datasets import fashion_mnist
+from keras.datasets import fashion_mnist
 
 if __name__ == "__main__":
 	(X_train, Y_train), (X_test, Y_test) = fashion_mnist.load_data()
@@ -25,7 +25,7 @@ if __name__ == "__main__":
 	X_test = X_test.reshape((X_test.shape[0], -1))
 
 	tm = MultiClassConvolutionalTsetlinMachine2D(
-		number_of_clauses=40000,
+		number_of_clauses=10000,
 		T=15000,
 		s=10,
 		dim=(28, 28, 8),

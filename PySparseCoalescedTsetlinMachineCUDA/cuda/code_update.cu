@@ -66,23 +66,23 @@ __device__ inline unsigned int get_state(unsigned int *ta_state, int clause, int
     return state;
 }
 
-__device__ inline void update_clause(curandState *localState, int *clause_weight, unsigned int *ta_state,
-                                     int clause_output, int clause_patch, int *X, int y, int class_sum) {
-    int target = 1 - 2 * (class_sum > y);
+__device__ inline void update_clause(curandState *localState, float *clause_weight, unsigned int *ta_state,
+                                     int clause_output, int clause_patch, int *X, int y, float class_sum) {
+    int target = 1 - 2 * (class_sum > (float)y);
 
     if (target == -1 && curand_uniform(localState) > 1.0 * Q / max(1, CLASSES - 1)) {
         return;
     }
 
-    int sign = (*clause_weight >= 0) - (*clause_weight < 0);
+    int sign = (*clause_weight >= 0.0) - (*clause_weight < 0.0);
 
-    int absolute_prediction_error = abs(y - class_sum);
-    if (curand_uniform(localState) <= 1.0 * absolute_prediction_error / (2 * THRESH)) {
+    float absolute_prediction_error = abs((float)y - class_sum);
+    if (curand_uniform(localState) <= 1.0 * absolute_prediction_error / (2.0 * (float)THRESH)) {
         if (target * sign > 0) {
             int included_literals = number_of_include_actions(ta_state);
 
             if (clause_output && abs(*clause_weight) < MAX_WEIGHT) {
-                (*clause_weight) += sign;
+                (*clause_weight) += (float)sign * 1.0;
             }
 
             // Type I Feedback
@@ -126,7 +126,7 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
             // Type II Feedback
 
             if (abs(*clause_weight) < MAX_WEIGHT) {
-                (*clause_weight) -= sign;
+                (*clause_weight) -= (float)sign * 1.0;
             }
             // (*clause_weight) -= sign;
 #if NEGATIVE_CLAUSES == 0
@@ -144,8 +144,8 @@ __device__ inline void update_clause(curandState *localState, int *clause_weight
 }
 
 // Evaluate example
-__global__ void evaluate(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *patch_weights,
-                         int *class_sum, unsigned int *clause_outputs, int *clause_patches, int *X) {
+__global__ void evaluate(curandState *state, unsigned int *global_ta_state, float *clause_weights, int *patch_weights,
+                         float *class_sum, unsigned int *clause_outputs, int *clause_patches, int *X) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     curandState localState = state[index];
@@ -182,7 +182,7 @@ __global__ void evaluate(curandState *state, unsigned int *global_ta_state, int 
             clause_patches[clause] = output_one_patches[patch_id];
             clause_outputs[clause] = 1;
             for (int class_id = 0; class_id < CLASSES; ++class_id) {
-                int clause_weight = clause_weights[class_id * CLAUSES + clause];
+                float clause_weight = clause_weights[class_id * CLAUSES + clause];
                 atomicAdd(&class_sum[class_id], clause_weight);
             }
         } else {
@@ -194,7 +194,7 @@ __global__ void evaluate(curandState *state, unsigned int *global_ta_state, int 
 }
 
 // Update state of Tsetlin Automata team
-__global__ void update(curandState *state, unsigned int *global_ta_state, int *clause_weights, int *class_sum,
+__global__ void update(curandState *state, unsigned int *global_ta_state, float *clause_weights, float *class_sum,
                        unsigned int *clause_outputs, int *clause_patches, int *X, int *y, int example) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
@@ -205,11 +205,11 @@ __global__ void update(curandState *state, unsigned int *global_ta_state, int *c
     for (unsigned long long clause = index; clause < CLAUSES; clause += stride) {
         unsigned int *ta_state = &global_ta_state[clause * LA_CHUNKS * STATE_BITS];
         for (unsigned int class_id = 0; class_id < CLASSES; ++class_id) {
-            int local_class_sum = class_sum[class_id];
+            float local_class_sum = class_sum[class_id];
             if (local_class_sum > THRESH) {
-                local_class_sum = THRESH;
+                local_class_sum = (float)THRESH;
             } else if (local_class_sum < -THRESH) {
-                local_class_sum = -THRESH;
+                local_class_sum = -(float)THRESH;
             }
             int enc_y = y[example * CLASSES + class_id];
             if (enc_y > 0)
